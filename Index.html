@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<title>Check-In Sales</title>
+<style>
+  :root{--biru:#0F2C4C;--aksen:#1D6FE0;--hijau:#12855B;--merah:#C7382E;--latar:#F5F7FA;--garis:#dde3ea;--teks:#1a2028;--redup:#6b7684}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--latar);color:var(--teks);font-size:14px;line-height:1.45}
+  .wrap{max-width:430px;margin:0 auto;padding:0 0 70px;padding-bottom:96px;}
+  .wrap.wide{max-width:1100px;padding:20px}
+  header.app{background:var(--biru);color:#fff;padding:16px 18px;border-radius:0 0 14px 14px}
+  header.app h1{margin:0;font-size:16px;font-weight:600}
+  header.app .sub{font-size:12px;opacity:.75;margin-top:2px}
+  .card{background:#fff;border-radius:10px;padding:14px;margin:12px 0;box-shadow:0 1px 3px rgba(16,38,64,.08)}
+  .label{font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--redup);font-weight:600;margin-bottom:6px}
+  select,input,textarea{width:100%;padding:10px;border:1px solid var(--garis);border-radius:8px;font:inherit;background:#fff}
+  button{font:inherit;cursor:pointer;border:none;border-radius:8px;padding:12px;font-weight:600}
+  .btn-primary{background:var(--aksen);color:#fff;width:100%}
+  .btn-danger{background:var(--merah);color:#fff;width:100%}
+  .btn-ghost{background:#eef2f7;color:var(--biru);padding:8px 12px;font-size:12px}
+  .btn-sm{padding:6px 10px;font-size:12px;border-radius:6px}
+  .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+  .b-hijau{background:#e3f4ec;color:var(--hijau)}
+  .b-merah{background:#fbe9e7;color:var(--merah)}
+  .b-kuning{background:#fdf3e0;color:#8a6100}
+  .b-abu{background:#eef2f7;color:var(--redup)}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f0f3f7}
+  .row:last-child{border-bottom:none}
+  .row .k{color:var(--redup);font-size:12px}
+  .row .v{font-weight:600;font-size:13px;text-align:right}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{background:var(--biru);color:#fff;text-align:left;padding:7px 8px;font-weight:600}
+  td{padding:7px 8px;border-bottom:1px solid #eef2f7;vertical-align:top}
+  tr:nth-child(even) td{background:#fafbfd}
+  .kpi{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:12px 0}
+  .kpi .box{background:#fff;border-radius:10px;padding:12px;box-shadow:0 1px 3px rgba(16,38,64,.08)}
+  .kpi .n{font-size:22px;font-weight:700;color:var(--biru)}
+  .kpi .t{font-size:11px;color:var(--redup);text-transform:uppercase;font-weight:600}
+  .nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--garis);display:flex;max-width:430px;margin:0 auto}
+  .nav button{flex:1;background:none;color:var(--redup);padding:10px 0;font-size:12px;border-radius:0}
+  .nav button.on{color:var(--aksen);font-weight:700}
+  .nav.wide{max-width:1100px}
+  .grid2{display:grid;grid-template-columns:1fr;gap:0}
+  @media(min-width:900px){.grid2{grid-template-columns:1fr 1fr;gap:12px;align-items:start}}
+  .nav button{padding:14px 0;min-height:48px}
+  .wrap.wide{padding-bottom:96px}
+  .err{background:#fbe9e7;color:var(--merah);padding:10px 12px;border-radius:8px;font-size:12px;margin:8px 0}
+  .ok{background:#e3f4ec;color:var(--hijau);padding:10px 12px;border-radius:8px;font-size:12px;margin:8px 0}
+  .warn{color:#8a6d1f;background:#fdf3d6;border-radius:8px;padding:6px 8px;font-size:12px;margin-top:6px;}
+.muted{color:var(--redup);font-size:12px}
+  .tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+  .tabs button{background:#eef2f7;color:var(--biru);padding:8px 12px;font-size:12px}
+  .tabs button.on{background:var(--aksen);color:#fff}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="loading" style="position:fixed;inset:0;background:rgba(245,247,250,.9);display:none;align-items:center;justify-content:center;z-index:99;font-weight:600;color:#0F2C4C">Memuat...</div>
+<script>
+/* ===== ADAPTER SERVER ===== */
+var state={user:null,tab:'toko',adminTab:'titik',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,loading:true,tanggal:'',hariIni:'',pilihToko:null};
+var db={outlets:[],checkins:[],users:[],aksesSPV:[],audit:[],settings:{radius_default:100,akurasi_maks:50,jam_mulai:'07:00',jam_selesai:'17:00',radius_min:30,radius_maks:300}};
+var SKEY='checkin_gas_sesi_v1';
+
+function panggil(fn,args){
+  return new Promise(function(resolve,reject){
+    var runner=google.script.run.withSuccessHandler(resolve).withFailureHandler(function(e){reject(e);});
+    runner[fn].apply(runner, args||[]);
+  });
+}
+
+function nowDate(){return state.tanggal;}
+function pad2(n){return String(n).padStart(2,'0');}
+
+function namaSales(kode){
+  if(state.user&&state.user.kode===kode)return state.user.nama;
+  for(var i=0;i<db.users.length;i++){if(db.users[i].login===kode)return db.users[i].nama;}
+  return kode;
+}
+
+function mapOutlet(o){
+  return {
+    kode:o.kode_toko, nama:o.nama_toko, alamat:o.alamat, kota:o.kota,
+    lat:(o.latitude===''||o.latitude==null)?null:Number(o.latitude),
+    lng:(o.longitude===''||o.longitude==null)?null:Number(o.longitude),
+    radius:(o.radius_m===''||o.radius_m==null)?null:Number(o.radius_m),
+    status:o.status_titik, aktif:o.aktif
+  };
+}
+
+function mapCheckin(c){
+  return {
+    checkin_id:c.checkin_id, tanggal:String(c.tanggal), sales:c.kode_sales, nama_sales:namaSales(c.kode_sales),
+    kode_toko:c.kode_toko, nama_toko:c.nama_toko_snapshot,
+    jam_masuk:c.jam_masuk, jam_keluar:c.jam_keluar||'',
+    akurasi_m:(c.akurasi_m===''||c.akurasi_m==null)?null:Number(c.akurasi_m),
+    jarak_m:(c.jarak_m===''||c.jarak_m==null)?null:Number(c.jarak_m),
+    validasi_status:c.validasi_status, status_batal:c.status_batal||'AKTIF',
+    alasan_batal:c.alasan_batal||'', dibatalkan_by:c.dibatalkan_by||'', dibatalkan_at:c.dibatalkan_at||''
+  };
+}
+
+function isiDB(data){
+  var s=data.settings||{};
+  db.settings={radius_default:s.radius_default_m||100,akurasi_maks:s.akurasi_maks_m||50,
+    jam_mulai:s.jam_kerja_mulai||'07:00',jam_selesai:s.jam_kerja_selesai||'17:00',
+    radius_min:s.radius_min_m||30,radius_maks:s.radius_maks_m||300};
+  state.tanggal=data.tanggal||'';
+  state.hariIni=data.tanggal||'';
+  db.users=(data.users||[]).map(function(u){return {login:u.kode_sales,nama:u.nama,role:u.role,aktif:u.aktif};});
+  db.outlets=(data.outlets||[]).map(mapOutlet);
+  db.checkins=(data.checkins||[]).map(mapCheckin);
+  db.aksesSPV=(data.aksesSPV||[]).map(function(a){
+    return typeof a==='string'?{spv:state.user.kode,kode_sales:a,aktif:true}:{spv:a.spv_user_id,kode_sales:a.kode_sales,aktif:a.aktif};
+  });
+  db.audit=(data.audit||[]).map(function(l){return {log_id:l.log_id,timestamp:l.timestamp,user:l.user_id,aksi:l.aksi,detail:l.detail};});
+}
+
+function muatData(){
+  if(!state.user)return Promise.resolve();
+  return panggil('getBootstrap',[state.user.kode]).then(function(data){
+    if(!data||!data.ok)throw new Error((data&&data.msg)||'Gagal memuat data');
+    isiDB(data);
+    state.user={kode:data.user.kode_sales,nama:data.user.nama,role:data.user.role,area:data.user.area};
+    state.loading=false;
+  });
+}
+
+function tampilLoading(on){
+  var el2=document.getElementById('loading');
+  if(el2)el2.style.display=on?'flex':'none';
+}
+
+function jalankan(p){
+  state.pesan=null;tampilLoading(true);
+  return p.then(function(r){
+    if(r&&r.ok===false){state.pesan=r.msg||'Gagal';state.pesanTipe='err';return null;}
+    state.pesan=(r&&r.msg)?r.msg:'Tersimpan';state.pesanTipe='ok';
+    return muatData();
+  }).catch(function(e){
+    state.pesan='Gagal: '+(e&&e.message?e.message:e);state.pesanTipe='err';
+  }).then(function(){
+    tampilLoading(false);render();
+  });
+}
+
+function cekAkses(kodeInput,pinInput){
+  var kode=String(kodeInput||'').trim().toUpperCase();
+  var pin=String(pinInput||'').trim();
+  if(!kode||!pin)return Promise.resolve({ok:false,msg:'ID dan PIN wajib diisi'});
+  tampilLoading(true);
+  return panggil('login',[kode,pin]).then(function(r){
+    if(!r.ok){tampilLoading(false);return r;}
+    state.user={kode:r.user.kode_sales,nama:r.user.nama,role:r.user.role,area:r.user.area};
+    localStorage.setItem(SKEY,JSON.stringify({kode:state.user.kode}));
+    return muatData().then(function(){tampilLoading(false);return {ok:true,msg:r.msg};});
+  }).catch(function(e){tampilLoading(false);return {ok:false,msg:String(e&&e.message?e.message:e)};});
+}
+
+function logout(){
+  localStorage.removeItem(SKEY);
+  state.user=null;state.tab='toko';state.adminTab='titik';state.spvTab='tim';state.pesan=null;
+  state.pilihToko=null;
+  db.checkins=[];db.outlets=[];db.users=[];db.aksesSPV=[];db.audit=[];
+  render();
+}
+
+function cekinAktif(){
+  if(!state.user)return null;
+  for(var i=0;i<db.checkins.length;i++){
+    var c=db.checkins[i];
+    if(c.sales===state.user.kode&&c.tanggal===state.tanggal&&!c.jam_keluar&&c.status_batal!=='BATAL')return c;
+  }
+  return null;
+}
+
+function outletByKode(k){for(var i=0;i<db.outlets.length;i++){if(db.outlets[i].kode===k)return db.outlets[i];}return null;}
+function adaTitik(o){return o&&o.status==='TITIK_FINAL'&&o.lat!=null&&o.lng!=null;}
+
+/* ===== API ===== */
+var api={
+  checkin:function(kodeToko,lat,lng,akurasi){return panggil('checkin',[state.user.kode,kodeToko,lat,lng,akurasi,String(navigator.userAgent||'')]);},
+  checkout:function(id){return panggil('checkout',[state.user.kode,id]);},
+  setTitikToko:function(kode,lat,lng,radius){return panggil('setTitikToko',[state.user.kode,kode,lat,lng,radius]);},
+  hapusTitikToko:function(kode){return panggil('hapusTitikToko',[state.user.kode,kode]);},
+  batalKunjungan:function(id,alasan){return panggil('batalKunjungan',[state.user.kode,id,alasan]);},
+  setAksesSPV:function(spv,kodeSales,aktif){return panggil('setAksesSPV',[state.user.kode,spv,kodeSales,aktif]);},
+  resetPin:function(target,pin){return panggil('resetPin',[state.user.kode,target,pin]);},
+  setUserAktif:function(target,aktif){return panggil('setUserAktif',[state.user.kode,target,aktif]);},
+  exportRekap:function(tanggal){return panggil('exportRekap',[state.user.kode,tanggal]);},
+  tambahUser:function(kodeSales,nama,email,role,area,pin){return panggil('tambahUser',[state.user.kode,nama,email,kodeSales,role,area,pin]);}
+};
+
+/* ===== UI DASAR ===== */
+function el(tag,attrs){
+  var kids=Array.prototype.slice.call(arguments,2);
+  var e=document.createElement(tag);
+  if(attrs){Object.keys(attrs).forEach(function(k){
+    if(k.indexOf('on')===0&&typeof attrs[k]==='function'){e.addEventListener(k.slice(2).toLowerCase(),attrs[k]);}
+    else if(k==='class'){e.className=attrs[k];}
+    else if(k==='html'){e.innerHTML=attrs[k];}
+    else{e.setAttribute(k,attrs[k]);}
+  });}
+  kids.forEach(function(k){
+    if(k==null||k===false)return;
+    e.appendChild((typeof k==='string'||typeof k==='number')?document.createTextNode(String(k)):k);
+  });
+  return e;
+}
+function pesanBox(){if(!state.pesan)return el('div',{});return el('div',{class:state.pesanTipe==='err'?'err':'ok'},state.pesan);}
+function badgeKelas(s){
+  if(s==='FINAL_DALAM_RADIUS')return 'b-hijau';
+  if(s==='TANPA_TITIK')return 'b-kuning';
+  if(s==='BATAL')return 'b-merah';
+  return 'b-abu';
+}
+function batalPesan(){
+  if(state.pesan){state.pesan=null;state.pesanTipe='ok';}
+}
+
+function render(){
+  var app=document.getElementById('app');
+  app.innerHTML='';
+  if(state.loading){app.appendChild(el('div',{class:'wrap'},el('div',{class:'card muted'},'Memuat data...')));return;}
+  if(!state.user){app.appendChild(renderLogin());return;}
+  if(state.user.role==='SALES'){app.appendChild(renderSales());return;}
+  if(state.user.role==='ADMIN'){app.appendChild(renderAdmin());return;}
+  app.appendChild(renderSpv());
+}
+
+function renderLogin(){
+  var w=el('div',{class:'wrap'});
+  w.appendChild(el('header',{class:'app'},el('h1',{},'Check-in Sales'),el('div',{class:'sub'},'PT Citra Mandiri Distribusindo')));
+  var c=el('div',{class:'card'});
+  c.appendChild(el('div',{class:'label'},'ID Pengguna'));
+  var inLogin=el('input',{id:'inLogin',placeholder:'contoh: SL-01',autocomplete:'off'});
+  c.appendChild(inLogin);
+  c.appendChild(el('div',{class:'label',style:'margin-top:12px'},'PIN'));
+  var inPin=el('input',{id:'inPin',type:'password',inputmode:'numeric',placeholder:'PIN Anda'});
+  c.appendChild(inPin);
+  c.appendChild(pesanBox());
+  var btn=el('button',{class:'btn-primary',style:'margin-top:12px'},'Masuk');
+  btn.addEventListener('click',function(){
+    btn.disabled=true;btn.textContent='Memeriksa...';
+    cekAkses(inLogin.value,inPin.value).then(function(r){
+      state.pesan=r&&r.ok?null:(r&&r.msg)||'Login gagal';
+      state.pesanTipe=r&&r.ok?'ok':'err';
+      render();
+    });
+  });
+  c.appendChild(btn);
+  w.appendChild(c);
+  return w;
+}
+
+/* ===== SALES ===== */
+function renderSales(){
+  var w=el('div',{class:'wrap'});
+  w.appendChild(el('header',{class:'app'},el('h1',{},state.user.nama),el('div',{class:'sub'},'Sales - '+state.user.kode)));
+  if(state.tab==='toko')w.appendChild(layarToko());
+  if(state.tab==='riwayat')w.appendChild(layarRiwayat());
+  var nav=el('div',{class:'nav'});
+  [['toko','Toko'],['riwayat','Riwayat']].forEach(function(p){
+    var b=el('button',{class:state.tab===p[0]?'on':''},p[1]);
+    b.addEventListener('click',function(){state.tab=p[0];batalPesan();render();});
+    nav.appendChild(b);
+  });
+  var out=el('button',{},'Keluar');
+  out.addEventListener('click',function(){logout();});
+  nav.appendChild(out);
+  w.appendChild(nav);
+  return w;
+}
+
+function infoToko(o){
+  if(!o)return '';
+  if(adaTitik(o))return '\u25CF Titik GPS tersedia - radius '+o.radius+' m, check-in divalidasi jarak';
+  return '\u25CB Belum ada titik GPS - check-in tetap boleh, hasil dicatat TANPA_TITIK';
+}
+
+function layarToko(){
+  var w=el('div',{});
+  var aktif=cekinAktif();
+  var c=el('div',{class:'card'});
+  c.appendChild(el('div',{class:'label'},'Pilih Toko'));
+  var sel=el('select',{id:'selToko'});
+  var pilihan=db.outlets.filter(function(o){return o.aktif!==false;});
+  var terpilih = state.pilihToko || (pilihan[0] && pilihan[0].kode) || '';
+  if(!pilihan.length)c.appendChild(el('div',{class:'warn'},'Belum ada toko aktif'));
+  pilihan.forEach(function(o){var at={value:o.kode};if(o.kode===terpilih)at.selected='selected';sel.appendChild(el('option',at,o.kode+' - '+o.nama));});
+  c.appendChild(sel);
+  sel.value=terpilih;
+  state.pilihToko=terpilih;
+
+  var info=el('div',{class:'muted',style:'margin-top:8px'},infoToko(outletByKode(sel.value)));
+  sel.addEventListener('change',function(){state.pilihToko=sel.value;info.textContent=infoToko(outletByKode(sel.value));});
+  c.appendChild(info);
+
+  if(!aktif){
+    c.appendChild(el('div',{class:'label',style:'margin-top:14px'},'Lokasi'));
+    var g=el('button',{class:'btn-ghost'},'Ambil GPS');
+    g.addEventListener('click',function(){
+      if(!navigator.geolocation){state.pesan='Perangkat tidak mendukung GPS';state.pesanTipe='err';render();return;}
+      g.textContent='Mengambil...';
+      navigator.geolocation.getCurrentPosition(function(p){
+        state.lokasi={lat:p.coords.latitude,lng:p.coords.longitude};
+        state.akurasi=Math.round(p.coords.accuracy||12);
+        state.pesan=null;render();
+      },function(e){
+        state.pesan='GPS gagal: '+e.message+'. Isi koordinat manual.';
+        state.pesanTipe='err';render();
+      },{enableHighAccuracy:true,timeout:10000,maximumAge:0});
+    });
+    c.appendChild(g);
+
+    var lat=el('input',{id:'inLat',type:'number',step:'0.000001',placeholder:'latitude',style:'margin-top:8px'});
+    var lng=el('input',{id:'inLng',type:'number',step:'0.000001',placeholder:'longitude',style:'margin-top:6px'});
+    if(state.lokasi){lat.value=state.lokasi.lat;lng.value=state.lokasi.lng;}
+    c.appendChild(lat);c.appendChild(lng);
+    var pk=el('button',{class:'btn-ghost',style:'margin-top:6px'},'Pakai Koordinat Manual');
+    pk.addEventListener('click',function(){
+      var a=Number(lat.value),b=Number(lng.value);
+      if(!a||!b){state.pesan='Isi latitude dan longitude';state.pesanTipe='err';render();return;}
+      state.lokasi={lat:a,lng:b};state.akurasi=state.akurasi||12;
+      state.pesan='Lokasi manual dipakai';state.pesanTipe='ok';render();
+    });
+    c.appendChild(pk);
+
+    c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Lokasi'),
+      el('span',{class:'v'},state.lokasi?state.lokasi.lat.toFixed(6)+', '+state.lokasi.lng.toFixed(6):'Belum diambil')));
+    c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Akurasi'),
+      el('span',{class:'v'},state.akurasi!=null?state.akurasi+' m':'-')));
+    c.appendChild(pesanBox());
+
+    var b=el('button',{class:'btn-primary',style:'margin-top:12px'},'Check In');
+    b.addEventListener('click',function(){
+      if(!state.lokasi){state.pesan='Ambil lokasi dulu';state.pesanTipe='err';render();return;}
+      b.disabled=true;b.textContent='Mengirim...';
+      jalankan(api.checkin(sel.value,state.lokasi.lat,state.lokasi.lng,state.akurasi));
+    });
+    c.appendChild(b);
+  }else{
+    c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Kunjungan aktif'),
+      el('span',{class:'v'},aktif.nama_toko+' '+aktif.jam_masuk)));
+    c.appendChild(pesanBox());
+    var b2=el('button',{class:'btn-danger',style:'margin-top:12px'},'Check Out');
+    b2.addEventListener('click',function(){
+      b2.disabled=true;b2.textContent='Mengirim...';
+      jalankan(api.checkout(aktif.checkin_id));
+    });
+    c.appendChild(b2);
+  }
+  w.appendChild(c);
+  return w;
+}
+
+function layarRiwayat(){
+  var w=el('div',{});
+  var list=db.checkins.filter(function(c){return c.tanggal===state.tanggal&&c.sales===state.user.kode;}).slice().reverse();
+  if(!list.length){w.appendChild(el('div',{class:'card muted'},'Belum ada kunjungan hari ini'));return w;}
+  list.forEach(function(c){
+    var st=c.status_batal==='BATAL'?'BATAL':c.validasi_status;
+    var b=el('div',{class:'card'});
+    var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
+    head.appendChild(el('strong',{},c.nama_toko));
+    head.appendChild(el('span',{class:'badge '+badgeKelas(st)},st));
+    b.appendChild(head);
+    b.appendChild(el('div',{class:'muted'},c.kode_toko+' - '+c.jam_masuk+(c.jam_keluar?' s/d '+c.jam_keluar:' - belum out')));
+    if(c.jarak_m!=null)b.appendChild(el('div',{class:'muted'},'Jarak '+c.jarak_m+' m, akurasi '+(c.akurasi_m!=null?c.akurasi_m+' m':'-')));
+    if(c.status_batal==='BATAL')b.appendChild(el('div',{class:'err'},'Dibatalkan: '+c.alasan_batal));
+    w.appendChild(b);
+  });
+  return w;
+}
+
+/* ===== ADMIN ===== */
+function renderAdmin(){
+  var w=el('div',{class:'wrap wide'});
+  w.appendChild(el('header',{class:'app'},el('h1',{},state.user.nama),el('div',{class:'sub'},'Admin Pusat - '+state.user.kode)));
+  if(state.adminTab==='titik')w.appendChild(adminTitik());
+  if(state.adminTab==='kunjungan')w.appendChild(adminKunjungan());
+  if(state.adminTab==='akses')w.appendChild(adminAkses());
+  if(state.adminTab==='user')w.appendChild(adminUser());
+  if(state.adminTab==='audit')w.appendChild(adminAudit());
+  var nav=el('div',{class:'nav wide'});
+  [['titik','Titik'],['kunjungan','Kunjungan'],['akses','Akses SPV'],['user','User'],['audit','Audit']].forEach(function(p){
+    var b=el('button',{class:state.adminTab===p[0]?'on':''},p[1]);
+    b.addEventListener('click',function(){state.adminTab=p[0];batalPesan();render();});
+    nav.appendChild(b);
+  });
+  var out=el('button',{},'Keluar');
+  out.addEventListener('click',function(){logout();});
+  nav.appendChild(out);
+  w.appendChild(nav);
+  return w;
+}
+
+function adminTitik(){
+  var w=el('div',{});
+  var ada=db.outlets.filter(function(o){return adaTitik(o);}).length;
+  var c=el('div',{class:'card'});
+  c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Titik final'),el('span',{class:'v'},ada+' dari '+db.outlets.length)));
+  c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Belum ada titik'),el('span',{class:'v'},String(db.outlets.length-ada))));
+  c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Radius sah'),el('span',{class:'v'},db.settings.radius_min+'-'+db.settings.radius_maks+' m')));
+  w.appendChild(c);
+  var pb=pesanBox(); if(pb)w.appendChild(pb);
+  var grid=el('div',{class:'grid2'});
+  db.outlets.forEach(function(o){grid.appendChild(adminKartuToko(o));});
+  w.appendChild(grid);
+  return w;
+}
+
+function adminKartuToko(o){
+  var c=el('div',{class:'card'});
+  var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
+  head.appendChild(el('strong',{},(adaTitik(o)?'\u25CF ':'\u25CB ')+o.kode));
+  head.appendChild(el('span',{class:'badge '+(adaTitik(o)?'b-hijau':'b-kuning')},adaTitik(o)?'ADA TITIK':'TANPA TITIK'));
+  c.appendChild(head);
+  c.appendChild(el('div',{},o.nama));
+  c.appendChild(el('div',{class:'muted'},o.alamat+', '+o.kota));
+  if(adaTitik(o)){
+    c.appendChild(el('div',{class:'muted'},'Titik '+o.lat.toFixed(6)+', '+o.lng.toFixed(6)+' - radius '+o.radius+' m'));
+  }else{
+    c.appendChild(el('div',{class:'warn'},'Belum ada titik GPS'));
+  }
+  c.appendChild(adminFormTitik(o));
+  return c;
+}
+
+function adminFormTitik(o){
+  var c=el('div',{style:'border-top:1px solid #eef2f7;margin-top:10px;padding-top:10px'});
+  c.appendChild(el('div',{class:'label'},'Set titik '+o.kode));
+  var lat=el('input',{type:'number',step:'0.000001',placeholder:'latitude',value:o.lat!=null?o.lat:''});
+  var lng=el('input',{type:'number',step:'0.000001',placeholder:'longitude',value:o.lng!=null?o.lng:''});
+  var rad=el('input',{type:'number',placeholder:'radius meter',value:o.radius!=null?o.radius:db.settings.radius_default});
+  c.appendChild(el('div',{class:'label',style:'margin-top:8px'},'Latitude'));c.appendChild(lat);
+  c.appendChild(el('div',{class:'label',style:'margin-top:6px'},'Longitude'));c.appendChild(lng);
+  c.appendChild(el('div',{class:'label',style:'margin-top:6px'},'Radius (meter)'));c.appendChild(rad);
+  var simpan=el('button',{class:'btn-primary',style:'margin-top:8px'},'Simpan Titik');
+  simpan.addEventListener('click',function(){
+    var a=Number(lat.value),b=Number(lng.value);
+    if(!a||!b){state.pesan='Isi latitude dan longitude';state.pesanTipe='err';render();return;}
+    simpan.disabled=true;simpan.textContent='Menyimpan...';
+    jalankan(api.setTitikToko(o.kode,a,b,Number(rad.value)||db.settings.radius_default));
+  });
+  c.appendChild(simpan);
+  if(adaTitik(o)){
+    var hapus=el('button',{class:'btn-danger',style:'margin-top:8px'},'Hapus Titik');
+    hapus.addEventListener('click',function(){
+      hapus.disabled=true;hapus.textContent='Menghapus...';
+      jalankan(api.hapusTitikToko(o.kode));
+    });
+    c.appendChild(hapus);
+  }
+  return c;
+}
+
+function adminKunjungan(){
+  var w=el('div',{});
+  var tgl=state.tanggal;
+  var list=db.checkins.filter(function(c){return c.tanggal===tgl;}).slice().reverse();
+  var c0=el('div',{class:'card'});
+  c0.appendChild(el('div',{class:'label'},'Kunjungan '+tgl));
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Total'),el('span',{class:'v'},String(list.length))));
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Dibatalkan'),el('span',{class:'v'},String(list.filter(function(x){return x.status_batal==='BATAL';}).length))));
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Masih di toko'),el('span',{class:'v'},String(list.filter(function(x){return !x.jam_keluar&&x.status_batal!=='BATAL';}).length))));
+  w.appendChild(c0);
+  w.appendChild(pemilihTanggal());
+  var pb=pesanBox(); if(pb)w.appendChild(pb);
+  if(!list.length){w.appendChild(el('div',{class:'card muted'},'Belum ada kunjungan hari ini'));return w;}
+  var grid=el('div',{class:'grid2'});
+  list.forEach(function(c){grid.appendChild(adminKartuKunjungan(c));});
+  w.appendChild(grid);
+  return w;
+}
+
+function adminKartuKunjungan(c){
+  var b=el('div',{class:'card'});
+  var st=c.status_batal==='BATAL'?'BATAL':c.validasi_status;
+  var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
+  head.appendChild(el('strong',{},c.nama_toko));
+  head.appendChild(el('span',{class:'badge '+badgeKelas(st)},st));
+  b.appendChild(head);
+  b.appendChild(el('div',{class:'muted'},c.nama_sales+' ('+c.sales+') - '+c.jam_masuk+(c.jam_keluar?' s/d '+c.jam_keluar:' - belum out')));
+  if(c.jarak_m!=null)b.appendChild(el('div',{class:'muted'},'Jarak '+c.jarak_m+' m, akurasi '+(c.akurasi_m!=null?c.akurasi_m+' m':'-')));
+  if(c.status_batal==='BATAL'){
+    b.appendChild(el('div',{class:'err'},'Dibatalkan '+c.dibatalkan_by+' - '+c.alasan_batal));
+  }else{
+    var al=el('input',{placeholder:'alasan pembatalan (wajib)'});
+    b.appendChild(al);
+    var bt=el('button',{class:'btn-danger',style:'margin-top:8px'},'Batalkan Kunjungan');
+    bt.addEventListener('click',function(){
+      if(!al.value.trim()){state.pesan='Alasan pembatalan wajib diisi';state.pesanTipe='err';render();return;}
+      bt.disabled=true;bt.textContent='Membatalkan...';
+      jalankan(api.batalKunjungan(c.checkin_id,al.value));
+    });
+    b.appendChild(bt);
+  }
+  return b;
+}
+
+function adminAkses(){
+  var w=el('div',{});
+  var spv=db.users.filter(function(u){return u.role==='SPV';});
+  var sales=db.users.filter(function(u){return u.role==='SALES';});
+  var pb=pesanBox(); if(pb)w.appendChild(pb);
+  if(!spv.length){w.appendChild(el('div',{class:'card muted'},'Belum ada user SPV'));return w;}
+  spv.forEach(function(s){
+    var c=el('div',{class:'card'});
+    c.appendChild(el('div',{class:'label'},s.login+' - '+s.nama));
+    sales.forEach(function(x){
+      var row=el('div',{class:'row'});
+      row.appendChild(el('span',{class:'k'},x.login+' '+x.nama));
+      var aktif=salesUntukSPV(s.login).indexOf(x.login)>=0;
+      var bt=el('button',{class:aktif?'btn-primary btn-sm':'btn-ghost'},aktif?'Diizinkan':'Tidak');
+      bt.addEventListener('click',function(){
+        bt.disabled=true;
+        jalankan(api.setAksesSPV(s.login,x.login,!aktif));
+      });
+      row.appendChild(bt);
+      c.appendChild(row);
+    });
+    w.appendChild(c);
+  });
+  return w;
+}
+
+function adminFormUser(){
+  var c=el('div',{class:'card'});
+  c.appendChild(el('div',{class:'label'},'Tambah user baru'));
+  var fId=el('input',{id:'nuId',placeholder:'ID login, contoh SL-10'});
+  var fNama=el('input',{id:'nuNama',placeholder:'Nama lengkap',style:'margin-top:8px'});
+  var fEmail=el('input',{id:'nuEmail',placeholder:'Email (opsional)',style:'margin-top:8px'});
+  var fArea=el('input',{id:'nuArea',placeholder:'Area (opsional)',style:'margin-top:8px'});
+  var fRole=el('select',{id:'nuRole',style:'margin-top:8px'});
+  ['SALES','SPV','ADMIN'].forEach(function(r){fRole.appendChild(el('option',{value:r},r));});
+  var fPin=el('input',{id:'nuPin',inputmode:'numeric',placeholder:'PIN 4-8 digit',style:'margin-top:8px'});
+  [fId,fNama,fEmail,fArea,fRole,fPin].forEach(function(x){c.appendChild(x);});
+  var bt=el('button',{class:'btn-primary',style:'margin-top:8px'},'Simpan User');
+  bt.addEventListener('click',function(){
+    var id=String(fId.value||'').trim().toUpperCase();
+    var nm=String(fNama.value||'').trim();
+    var em=String(fEmail.value||'').trim();
+    var ar=String(fArea.value||'').trim();
+    var rl=fRole.value;
+    var pn=String(fPin.value||'').trim();
+    if(!id){state.pesan='ID login wajib diisi';state.pesanTipe='err';render();return;}
+    if(!nm){state.pesan='Nama wajib diisi';state.pesanTipe='err';render();return;}
+    if(!/^[0-9]{4,8}$/.test(pn)){state.pesan='PIN harus 4-8 digit angka';state.pesanTipe='err';render();return;}
+    bt.disabled=true;bt.textContent='Menyimpan...';
+    jalankan(api.tambahUser(id,nm,em,rl,ar,pn));
+  });
+  c.appendChild(bt);
+  return c;
+}
+
+function pemilihTanggal(){
+  var c=el('div',{class:'card'});
+  c.appendChild(el('div',{class:'label'},'Tanggal laporan'));
+  var inp=el('input',{type:'date',value:state.tanggal});
+  inp.addEventListener('change',function(){
+    if(!inp.value)return;
+    state.tanggal=inp.value;batalPesan();render();
+  });
+  c.appendChild(inp);
+  var bt=el('button',{class:'btn-ghost',style:'margin-top:8px'},'Hari ini');
+  bt.addEventListener('click',function(){
+    state.tanggal=state.hariIni||state.tanggal;batalPesan();render();
+  });
+  c.appendChild(bt);
+  return c;
+}
+
+function adminUser(){
+  var w=el('div',{});
+  var pb=pesanBox(); if(pb)w.appendChild(pb);
+  var c0=el('div',{class:'card'});
+  c0.appendChild(el('div',{class:'label'},'Daftar user ('+db.users.length+')'));
+  c0.appendChild(el('div',{class:'muted'},'PIN hanya bisa direset, tidak bisa dilihat.'));
+  w.appendChild(c0);
+  w.appendChild(adminFormUser());
+  db.users.forEach(function(u){
+    var c=el('div',{class:'card'});
+    var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
+    head.appendChild(el('strong',{},u.login));
+    head.appendChild(el('span',{class:'badge '+(u.aktif?'b-hijau':'b-merah')},u.aktif?'AKTIF':'NONAKTIF'));
+    c.appendChild(head);
+    c.appendChild(el('div',{},u.nama));
+    c.appendChild(el('div',{class:'muted'},u.role));
+    var pin=el('input',{type:'text',inputmode:'numeric',placeholder:'PIN baru (4-8 digit)',style:'margin-top:8px'});
+    c.appendChild(pin);
+    var rp=el('button',{class:'btn-primary',style:'margin-top:8px'},'Reset PIN');
+    rp.addEventListener('click',function(){
+      var v=String(pin.value||'').trim();
+      if(!/^[0-9]{4,8}$/.test(v)){state.pesan='PIN harus 4-8 digit angka';state.pesanTipe='err';render();return;}
+      rp.disabled=true;rp.textContent='Menyimpan...';
+      jalankan(api.resetPin(u.login,v));
+    });
+    c.appendChild(rp);
+    if(u.login!==state.user.kode){
+      var tg=el('button',{class:u.aktif?'btn-danger':'btn-ghost',style:'margin-top:8px'},u.aktif?'Nonaktifkan':'Aktifkan');
+      tg.addEventListener('click',function(){
+        tg.disabled=true;
+        jalankan(api.setUserAktif(u.login,!u.aktif));
+      });
+      c.appendChild(tg);
+    }
+    w.appendChild(c);
+  });
+  return w;
+}
+
+function adminAudit(){
+  var w=el('div',{});
+  var list=db.audit;
+  var c=el('div',{class:'card'});
+  c.appendChild(el('div',{class:'label'},'Log audit terakhir'));
+  c.appendChild(el('div',{class:'muted'},String(list.length)+' baris ditampilkan'));
+  w.appendChild(c);
+  if(!list.length){w.appendChild(el('div',{class:'card muted'},'Belum ada log'));return w;}
+  list.forEach(function(a){
+    var b=el('div',{class:'card'});
+    var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
+    head.appendChild(el('strong',{},a.aksi));
+    head.appendChild(el('span',{class:'muted'},String(a.timestamp).slice(11)));
+    b.appendChild(head);
+    b.appendChild(el('div',{class:'muted'},a.user+' - '+a.detail));
+    w.appendChild(b);
+  });
+  return w;
+}
+
+/* ===== SPV ===== */
+function salesUntukSPV(login){
+  return db.aksesSPV.filter(function(a){return a.spv===login&&a.aktif;}).map(function(a){return a.kode_sales;});
+}
+
+function renderSpv(){
+  var w=el('div',{class:'wrap wide'});
+  w.appendChild(el('header',{class:'app'},el('h1',{},state.user.nama),el('div',{class:'sub'},'Supervisor - '+state.user.kode)));
+  w.appendChild(pemilihTanggal());
+  if(state.spvTab==='tim')w.appendChild(spvTim());
+  if(state.spvTab==='rekap')w.appendChild(spvRekap());
+  if(state.spvTab==='toko')w.appendChild(spvToko());
+  var nav=el('div',{class:'nav wide'});
+  [['tim','Tim'],['rekap','Rekap'],['toko','Toko']].forEach(function(p){
+    var b=el('button',{class:state.spvTab===p[0]?'on':''},p[1]);
+    b.addEventListener('click',function(){state.spvTab=p[0];batalPesan();render();});
+    nav.appendChild(b);
+  });
+  var out=el('button',{},'Keluar');
+  out.addEventListener('click',function(){logout();});
+  nav.appendChild(out);
+  w.appendChild(nav);
+  return w;
+}
+
+function spvSalesList(){
+  var kode=salesUntukSPV(state.user.kode);
+  return db.users.filter(function(u){return u.role==='SALES'&&kode.indexOf(u.login)>=0;});
+}
+
+function spvTim(){
+  var w=el('div',{});
+  var list=spvSalesList();
+  var c0=el('div',{class:'card'});
+  c0.appendChild(el('div',{class:'label'},'Tim saya - '+state.tanggal));
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Jumlah sales'),el('span',{class:'v'},String(list.length))));
+  w.appendChild(c0);
+  var pb=pesanBox(); if(pb)w.appendChild(pb);
+  if(!list.length){w.appendChild(el('div',{class:'card muted'},'Belum ada sales yang diizinkan admin'));return w;}
+  var grid=el('div',{class:'grid2'});
+  list.forEach(function(u){grid.appendChild(spvKartuSales(u));});
+  w.appendChild(grid);
+  return w;
+}
+
+function spvKartuSales(u){
+  var tgl=state.tanggal;
+  var cek=db.checkins.filter(function(c){return c.sales===u.login&&c.tanggal===tgl;});
+  var aktif=null;
+  for(var i=0;i<cek.length;i++){if(!cek[i].jam_keluar&&cek[i].status_batal!=='BATAL'){aktif=cek[i];break;}}
+  var batal=cek.filter(function(c){return c.status_batal==='BATAL';});
+  var tanpa=cek.filter(function(c){return c.validasi_status==='TANPA_TITIK'&&c.status_batal!=='BATAL';});
+  var c=el('div',{class:'card'});
+  var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
+  head.appendChild(el('strong',{},u.nama));
+  head.appendChild(el('span',{class:'badge '+(aktif?'b-hijau':'b-abu')},aktif?'DI TOKO':'IDLE'));
+  c.appendChild(head);
+  c.appendChild(el('div',{class:'muted'},u.login));
+  if(aktif)c.appendChild(el('div',{class:'muted'},'Di '+aktif.nama_toko+' sejak '+aktif.jam_masuk));
+  c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Kunjungan'),el('span',{class:'v'},String(cek.length))));
+  c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Tanpa titik'),el('span',{class:'v'},String(tanpa.length))));
+  c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Dibatalkan'),el('span',{class:'v'},String(batal.length))));
+  return c;
+}
+
+function unduhCsv(teks,namaFile){
+  try{
+    var blob=new Blob(['\ufeff'+teks],{type:'text/csv;charset=utf-8'});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url;a.download=namaFile;
+    document.body.appendChild(a);a.click();
+    setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},1500);
+    return true;
+  }catch(e){return false;}
+}
+
+function spvRekap(){
+  var w=el('div',{});
+  var kode=salesUntukSPV(state.user.kode);
+  var semua=db.checkins.filter(function(c){return c.tanggal===state.tanggal&&kode.indexOf(c.sales)>=0;});
+  var sah=semua.filter(function(c){return c.status_batal!=='BATAL';});
+  var c0=el('div',{class:'card'});
+  c0.appendChild(el('div',{class:'label'},'Rekap tim '+state.tanggal));
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Total kunjungan sah'),el('span',{class:'v'},String(sah.length))));
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Dalam radius'),el('span',{class:'v'},String(sah.filter(function(c){return c.validasi_status==='FINAL_DALAM_RADIUS';}).length))));
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Tanpa titik'),el('span',{class:'v'},String(sah.filter(function(c){return c.validasi_status==='TANPA_TITIK';}).length))));
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Dibatalkan'),el('span',{class:'v'},String(semua.length-sah.length))));
+  w.appendChild(c0);
+  var pb=pesanBox(); if(pb)w.appendChild(pb);
+  var bx=el('button',{class:'btn-primary',style:'margin-top:8px'},'Export CSV');
+  bx.addEventListener('click',function(){
+    bx.disabled=true;bx.textContent='Menyiapkan...';
+    state.pesan=null;
+    api.exportRekap(state.tanggal).then(function(r){
+      bx.disabled=false;bx.textContent='Export CSV';
+      if(!r||r.ok===false){state.pesan=(r&&r.msg)||'Export gagal';state.pesanTipe='err';render();return;}
+      var nama='rekap-'+state.tanggal+'.csv';
+      if(unduhCsv(r.csv,nama)){state.pesan='Export siap: '+r.jumlah+' kunjungan ('+nama+')';state.pesanTipe='ok';render();}
+      else{state.pesan='Browser memblokir unduhan. Salin CSV dari kotak di bawah.';state.pesanTipe='err';
+        var ta=el('textarea',{style:'width:100%;height:160px;margin-top:8px'});ta.value=r.csv;
+        var lama=document.getElementById('csvManual');if(lama)lama.remove();
+        ta.id='csvManual';document.getElementById('app').appendChild(ta);}
+    }).catch(function(e){
+      bx.disabled=false;bx.textContent='Export CSV';
+      state.pesan='Export gagal: '+(e&&e.message?e.message:e);state.pesanTipe='err';render();
+    });
+  });
+  c0.appendChild(bx);
+  if(!sah.length){w.appendChild(el('div',{class:'card muted'},'Belum ada kunjungan tim hari ini'));return w;}
+  sah.slice().reverse().forEach(function(c){
+    var b=el('div',{class:'card'});
+    var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
+    head.appendChild(el('strong',{},c.nama_toko));
+    head.appendChild(el('span',{class:'badge '+badgeKelas(c.validasi_status)},c.validasi_status));
+    b.appendChild(head);
+    b.appendChild(el('div',{class:'muted'},c.nama_sales+' - '+c.jam_masuk+(c.jarak_m!=null?' - '+c.jarak_m+' m':'')));
+    w.appendChild(b);
+  });
+  return w;
+}
+
+function spvToko(){
+  var w=el('div',{});
+  var ada=db.outlets.filter(function(o){return adaTitik(o);}).length;
+  var c0=el('div',{class:'card'});
+  c0.appendChild(el('div',{class:'label'},'Status titik toko'));
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Ada titik'),el('span',{class:'v'},String(ada))));
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Tanpa titik'),el('span',{class:'v'},String(db.outlets.length-ada))));
+  w.appendChild(c0);
+  db.outlets.filter(function(o){return !adaTitik(o);}).forEach(function(o){
+    var b=el('div',{class:'card'});
+    var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
+    head.appendChild(el('strong',{},'\u25CB '+o.kode));
+    head.appendChild(el('span',{class:'badge b-kuning'},'TANPA TITIK'));
+    b.appendChild(head);
+    b.appendChild(el('div',{},o.nama));
+    b.appendChild(el('div',{class:'muted'},o.alamat+', '+o.kota));
+    b.appendChild(el('div',{class:'warn'},'Minta admin pusat set titik GPS'));
+    w.appendChild(b);
+  });
+  return w;
+}
+
+/* ===== BOOT ===== */
+(function(){
+  var simpan=null;
+  try{simpan=JSON.parse(localStorage.getItem(SKEY)||'null');}catch(e){simpan=null;}
+  if(!simpan||!simpan.kode){state.loading=false;render();return;}
+  panggil('getBootstrap',[simpan.kode]).then(function(data){
+    if(!data||!data.ok){localStorage.removeItem(SKEY);state.loading=false;render();return;}
+    state.user={kode:data.user.kode_sales,nama:data.user.nama,role:data.user.role,area:data.user.area};
+    isiDB(data);
+    state.loading=false;
+    render();
+  }).catch(function(){
+    localStorage.removeItem(SKEY);
+    state.loading=false;
+    render();
+  });
+})();
+</script>
+</body>
+</html>

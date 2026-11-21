@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-<base target="_top">
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Check-In Sales</title>
 <style>
   :root{--biru:#0F2C4C;--aksen:#1D6FE0;--hijau:#12855B;--merah:#C7382E;--latar:#F5F7FA;--garis:#dde3ea;--teks:#1a2028;--redup:#6b7684}
@@ -64,10 +64,20 @@ var state={user:null,tab:'toko',adminTab:'titik',spvTab:'tim',pesan:null,pesanTi
 var db={outlets:[],checkins:[],users:[],aksesSPV:[],audit:[],settings:{radius_default:100,akurasi_maks:50,jam_mulai:'07:00',jam_selesai:'17:00',radius_min:30,radius_maks:300}};
 var SKEY='checkin_gas_sesi_v1';
 
+var API_URL='https://script.google.com/macros/s/AKfycbwfs31wIlYlptkHJYuv_GXruPB8PZp188svfy5QK2C7OBgR9ReX7VMI-W35nRR9JZcmiA/exec';
+
 function panggil(fn,args){
-  return new Promise(function(resolve,reject){
-    var runner=google.script.run.withSuccessHandler(resolve).withFailureHandler(function(e){reject(e);});
-    runner[fn].apply(runner, args||[]);
+  return fetch(API_URL,{
+    method:'POST',
+    redirect:'follow',
+    headers:{'Content-Type':'text/plain;charset=utf-8'},
+    body:JSON.stringify({fn:fn,args:args||[]})
+  }).then(function(res){
+    return res.text().then(function(txt){
+      if(!res.ok)throw new Error('HTTP '+res.status);
+      try{return JSON.parse(txt);}
+      catch(e){throw new Error('Respons server bukan JSON (pastikan doPost sudah di-deploy dengan akses Anyone)');}
+    });
   });
 }
 

@@ -53,6 +53,12 @@
   .tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
   .tabs button{background:#eef2f7;color:var(--biru);padding:8px 12px;font-size:12px}
   .tabs button.on{background:var(--aksen);color:#fff}
+  .modal-bg{position:fixed;inset:0;background:rgba(15,44,76,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:100}
+  .modal-box{background:#fff;border-radius:12px;padding:18px;max-width:380px;width:100%;box-shadow:0 10px 30px rgba(0,0,0,.22)}
+  .modal-box h2{margin:0 0 8px;font-size:16px;color:var(--biru)}
+  .modal-actions{display:flex;gap:8px;margin-top:14px}
+  .modal-actions button{flex:1}
+  button:disabled{opacity:.55;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -60,7 +66,7 @@
 <div id="loading" style="position:fixed;inset:0;background:rgba(245,247,250,.9);display:none;align-items:center;justify-content:center;z-index:99;font-weight:600;color:#0F2C4C">Memuat...</div>
 <script>
 /* ===== ADAPTER SERVER ===== */
-var state={user:null,tab:'toko',adminTab:'titik',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,loading:true,tanggal:'',hariIni:'',pilihToko:null};
+var state={user:null,tab:'toko',adminTab:'titik',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,gpsStatus:'idle',gpsErr:null,konfirmasiToko:null,loading:true,tanggal:'',hariIni:'',pilihToko:null};
 var db={outlets:[],checkins:[],users:[],aksesSPV:[],audit:[],settings:{radius_default:100,akurasi_maks:50,jam_mulai:'07:00',jam_selesai:'17:00',radius_min:30,radius_maks:300}};
 var SKEY='checkin_gas_sesi_v1';
 
@@ -172,7 +178,7 @@ function cekAkses(kodeInput,pinInput){
 function logout(){
   localStorage.removeItem(SKEY);
   state.user=null;state.tab='toko';state.adminTab='titik';state.spvTab='tim';state.pesan=null;
-  state.pilihToko=null;
+  state.pilihToko=null;state.lokasi=null;state.akurasi=null;state.gpsStatus='idle';state.gpsErr=null;state.konfirmasiToko=null;
   db.checkins=[];db.outlets=[];db.users=[];db.aksesSPV=[];db.audit=[];
   render();
 }
@@ -211,6 +217,7 @@ function el(tag,attrs){
     if(k.indexOf('on')===0&&typeof attrs[k]==='function'){e.addEventListener(k.slice(2).toLowerCase(),attrs[k]);}
     else if(k==='class'){e.className=attrs[k];}
     else if(k==='html'){e.innerHTML=attrs[k];}
+    else if(k==='disabled'){e.disabled=!!attrs[k];}
     else{e.setAttribute(k,attrs[k]);}
   });}
   kids.forEach(function(k){
@@ -266,6 +273,68 @@ function renderLogin(){
 }
 
 /* ===== SALES ===== */
+function mulaiGPS(paksa){
+  if(!paksa&&state.gpsStatus!=='idle')return;
+  if(!navigator.geolocation){
+    state.gpsStatus='err';
+    state.gpsErr='Perangkat atau browser tidak mendukung GPS.';
+    render();
+    return;
+  }
+  state.gpsStatus='loading';
+  state.gpsErr=null;
+  render();
+  navigator.geolocation.getCurrentPosition(function(p){
+    state.lokasi={lat:p.coords.latitude,lng:p.coords.longitude};
+    state.akurasi=Math.round(p.coords.accuracy||0);
+    state.gpsStatus='ok';
+    state.gpsErr=null;
+    render();
+  },function(e){
+    state.gpsStatus='err';
+    var msg='GPS gagal diambil ('+e.message+'). Pastikan GPS aktif & izinkan akses lokasi di browser, lalu klik Refresh GPS.';
+    state.gpsErr=msg;
+    render();
+  },{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+}
+
+function renderModalKonfirmasi(toko){
+  var bg=el('div',{class:'modal-bg'});
+  var box=el('div',{class:'modal-box'});
+  box.appendChild(el('h2',{},'Konfirmasi Lokasi Toko'));
+  box.appendChild(el('div',{class:'warn',style:'margin-bottom:10px'},
+    'Toko ini belum memiliki titik GPS final. Check-in akan dicatat dengan status TANPA_TITIK.'));
+  box.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Toko'),el('span',{class:'v'},toko.kode+' - '+toko.nama)));
+  if(toko.alamat){
+    box.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Alamat'),el('span',{class:'v'},toko.alamat+(toko.kota?', '+toko.kota:''))));
+  }
+  box.appendChild(el('div',{class:'row'},el('span',{class:'k'},'GPS Anda'),
+    el('span',{class:'v'},state.lokasi?state.lokasi.lat.toFixed(6)+', '+state.lokasi.lng.toFixed(6):'-')));
+  box.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Akurasi'),
+    el('span',{class:'v'},state.akurasi!=null?state.akurasi+' m':'-')));
+  box.appendChild(el('div',{style:'margin-top:10px;font-weight:600;font-size:13px'},
+    'Apakah Anda benar-benar sedang berada di lokasi toko ini?'));
+
+  var act=el('div',{class:'modal-actions'});
+  var btnBatal=el('button',{class:'btn-ghost'},'Batal');
+  btnBatal.addEventListener('click',function(){
+    state.konfirmasiToko=null;
+    render();
+  });
+  var btnYa=el('button',{class:'btn-primary'},'Ya, Saya di Toko Ini');
+  btnYa.addEventListener('click',function(){
+    var kode=toko.kode;
+    state.konfirmasiToko=null;
+    btnYa.disabled=true;btnYa.textContent='Mengirim...';
+    jalankan(api.checkin(kode,state.lokasi.lat,state.lokasi.lng,state.akurasi));
+  });
+  act.appendChild(btnBatal);
+  act.appendChild(btnYa);
+  box.appendChild(act);
+  bg.appendChild(box);
+  return bg;
+}
+
 function renderSales(){
   var w=el('div',{class:'wrap'});
   w.appendChild(el('header',{class:'app'},el('h1',{},state.user.nama),el('div',{class:'sub'},'Sales - '+state.user.kode)));
@@ -281,13 +350,14 @@ function renderSales(){
   out.addEventListener('click',function(){logout();});
   nav.appendChild(out);
   w.appendChild(nav);
+  if(state.konfirmasiToko)w.appendChild(renderModalKonfirmasi(state.konfirmasiToko));
   return w;
 }
 
 function infoToko(o){
   if(!o)return '';
   if(adaTitik(o))return '\u25CF Titik GPS tersedia - radius '+o.radius+' m, check-in divalidasi jarak';
-  return '\u25CB Belum ada titik GPS - check-in tetap boleh, hasil dicatat TANPA_TITIK';
+  return '\u25CB Belum ada titik GPS - check-in tetap boleh dengan konfirmasi lokasi (TANPA_TITIK)';
 }
 
 function layarToko(){
@@ -304,51 +374,53 @@ function layarToko(){
   sel.value=terpilih;
   state.pilihToko=terpilih;
 
-  var info=el('div',{class:'muted',style:'margin-top:8px'},infoToko(outletByKode(sel.value)));
-  sel.addEventListener('change',function(){state.pilihToko=sel.value;info.textContent=infoToko(outletByKode(sel.value));});
+  var tokoTerpilih=outletByKode(sel.value);
+  var info=el('div',{class:tokoTerpilih&&!adaTitik(tokoTerpilih)?'warn':'muted',style:'margin-top:8px'},infoToko(tokoTerpilih));
+  sel.addEventListener('change',function(){
+    state.pilihToko=sel.value;
+    var t=outletByKode(sel.value);
+    info.className=(t&&!adaTitik(t))?'warn':'muted';
+    info.textContent=infoToko(t);
+  });
   c.appendChild(info);
 
   if(!aktif){
-    c.appendChild(el('div',{class:'label',style:'margin-top:14px'},'Lokasi'));
-    var g=el('button',{class:'btn-ghost'},'Ambil GPS');
-    g.addEventListener('click',function(){
-      if(!navigator.geolocation){state.pesan='Perangkat tidak mendukung GPS';state.pesanTipe='err';render();return;}
-      g.textContent='Mengambil...';
-      navigator.geolocation.getCurrentPosition(function(p){
-        state.lokasi={lat:p.coords.latitude,lng:p.coords.longitude};
-        state.akurasi=Math.round(p.coords.accuracy||12);
-        state.pesan=null;render();
-      },function(e){
-        state.pesan='GPS gagal: '+e.message+'. Isi koordinat manual.';
-        state.pesanTipe='err';render();
-      },{enableHighAccuracy:true,timeout:10000,maximumAge:0});
-    });
-    c.appendChild(g);
+    if(state.gpsStatus==='idle'){
+      setTimeout(function(){mulaiGPS(false);},0);
+    }
+    var headLok=el('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-top:14px;margin-bottom:6px'});
+    headLok.appendChild(el('div',{class:'label',style:'margin:0'},'Lokasi GPS (Otomatis)'));
+    var g=el('button',{class:'btn-ghost btn-sm',disabled:state.gpsStatus==='loading'},state.gpsStatus==='loading'?'Mencari GPS...':'Refresh GPS');
+    g.addEventListener('click',function(){mulaiGPS(true);});
+    headLok.appendChild(g);
+    c.appendChild(headLok);
 
-    var lat=el('input',{id:'inLat',type:'number',step:'0.000001',placeholder:'latitude',style:'margin-top:8px'});
-    var lng=el('input',{id:'inLng',type:'number',step:'0.000001',placeholder:'longitude',style:'margin-top:6px'});
-    if(state.lokasi){lat.value=state.lokasi.lat;lng.value=state.lokasi.lng;}
-    c.appendChild(lat);c.appendChild(lng);
-    var pk=el('button',{class:'btn-ghost',style:'margin-top:6px'},'Pakai Koordinat Manual');
-    pk.addEventListener('click',function(){
-      var a=Number(lat.value),b=Number(lng.value);
-      if(!a||!b){state.pesan='Isi latitude dan longitude';state.pesanTipe='err';render();return;}
-      state.lokasi={lat:a,lng:b};state.akurasi=state.akurasi||12;
-      state.pesan='Lokasi manual dipakai';state.pesanTipe='ok';render();
-    });
-    c.appendChild(pk);
+    if(state.gpsErr){
+      c.appendChild(el('div',{class:'err'},state.gpsErr));
+    }
 
-    c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Lokasi'),
-      el('span',{class:'v'},state.lokasi?state.lokasi.lat.toFixed(6)+', '+state.lokasi.lng.toFixed(6):'Belum diambil')));
+    var statusTeks=state.gpsStatus==='loading'?'Mengambil GPS otomatis...':(state.lokasi?state.lokasi.lat.toFixed(6)+', '+state.lokasi.lng.toFixed(6):'Menunggu GPS...');
+    c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Koordinat'),el('span',{class:'v'},statusTeks)));
     c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Akurasi'),
       el('span',{class:'v'},state.akurasi!=null?state.akurasi+' m':'-')));
+    if(state.akurasi!=null&&state.akurasi>db.settings.akurasi_maks){
+      c.appendChild(el('div',{class:'warn'},'Akurasi GPS ('+state.akurasi+' m) melebihi batas '+db.settings.akurasi_maks+' m. Coba geser ke area terbuka lalu klik Refresh GPS.'));
+    }
     c.appendChild(pesanBox());
 
-    var b=el('button',{class:'btn-primary',style:'margin-top:12px'},'Check In');
+    var b=el('button',{class:'btn-primary',style:'margin-top:12px',disabled:!state.lokasi||state.gpsStatus==='loading'},
+      state.gpsStatus==='loading'?'Menunggu GPS...':'Check In');
     b.addEventListener('click',function(){
-      if(!state.lokasi){state.pesan='Ambil lokasi dulu';state.pesanTipe='err';render();return;}
+      if(!state.lokasi){state.pesan='Menunggu lokasi GPS terkunci';state.pesanTipe='err';render();return;}
+      var toko=outletByKode(sel.value);
+      if(!toko){state.pesan='Pilih toko terlebih dahulu';state.pesanTipe='err';render();return;}
+      if(!adaTitik(toko)){
+        state.konfirmasiToko=toko;
+        render();
+        return;
+      }
       b.disabled=true;b.textContent='Mengirim...';
-      jalankan(api.checkin(sel.value,state.lokasi.lat,state.lokasi.lng,state.akurasi));
+      jalankan(api.checkin(toko.kode,state.lokasi.lat,state.lokasi.lng,state.akurasi));
     });
     c.appendChild(b);
   }else{
@@ -358,7 +430,10 @@ function layarToko(){
     var b2=el('button',{class:'btn-danger',style:'margin-top:12px'},'Check Out');
     b2.addEventListener('click',function(){
       b2.disabled=true;b2.textContent='Mengirim...';
-      jalankan(api.checkout(aktif.checkin_id));
+      jalankan(api.checkout(aktif.checkin_id)).then(function(){
+        state.lokasi=null;state.akurasi=null;state.gpsStatus='idle';state.gpsErr=null;
+        render();
+      });
     });
     c.appendChild(b2);
   }

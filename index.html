@@ -93,6 +93,21 @@
   .pin-live-on{background:#12855B}
   .pin-live-idle{background:#1D6FE0}
   .nav.wide button{font-size:11px;padding:12px 2px}
+  .sw{position:relative;display:inline-block;width:44px;height:24px;vertical-align:middle}
+  .sw input{opacity:0;width:0;height:0;position:absolute}
+  .sw-slider{position:absolute;cursor:pointer;inset:0;background:#cbd5e1;border-radius:24px;transition:.2s}
+  .sw-slider:before{content:"";position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px rgba(0,0,0,.25)}
+  .sw input:checked + .sw-slider{background:var(--hijau)}
+  .sw input:checked + .sw-slider:before{transform:translateX(20px)}
+  .sw input:disabled + .sw-slider{opacity:.5;cursor:not-allowed}
+  .xl-wrap{overflow-x:auto;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
+  .xl-tbl{width:100%;border-collapse:collapse;font-size:12px;min-width:680px}
+  .xl-tbl th{background:#0F2C4C;color:#fff;padding:8px 10px;border:1px solid #1e3f66;white-space:nowrap;font-weight:600}
+  .xl-tbl td{padding:7px 9px;border:1px solid #dde3ea;vertical-align:middle}
+  .xl-tbl tr:nth-child(even) td{background:#f8fafc}
+  .xl-tbl tr:hover td{background:#eef5ff}
+  .xl-tbl tr.xl-off td{opacity:.62;background:#f9fafb}
+  .xl-act{display:flex;gap:6px;align-items:center;flex-wrap:nowrap;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -100,7 +115,7 @@
 <div id="loading" style="position:fixed;inset:0;background:rgba(245,247,250,.9);display:none;align-items:center;justify-content:center;z-index:99;font-weight:600;color:#0F2C4C">Memuat...</div>
 <script>
 /* ===== ADAPTER SERVER ===== */
-var state={user:null,tab:'toko',adminTab:'titik',bosTab:'tim',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,gpsStatus:'idle',gpsErr:null,konfirmasiToko:null,tokoPanel:null,cariToko:'',csvPreview:null,csvNamaFile:'',csvErr:null,petaSales:null,batas30Hari:'',jumlahCheckinLama:0,liveAutoRefresh:true,liveSales:[],liveLastRefresh:'',liveFokus:null,liveLoading:false,loading:true,tanggal:'',hariIni:'',pilihToko:null};
+var state={user:null,tab:'toko',adminTab:'tim',bosTab:'tim',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,gpsStatus:'idle',gpsErr:null,konfirmasiToko:null,tokoPanel:null,cariToko:'',csvPreview:null,csvNamaFile:'',csvErr:null,petaSales:null,batas30Hari:'',jumlahCheckinLama:0,liveAutoRefresh:true,liveSales:[],liveLastRefresh:'',liveFokus:null,liveLoading:false,loading:true,tanggal:'',hariIni:'',pilihToko:null};
 var db={outlets:[],checkins:[],users:[],aksesSPV:[],audit:[],settings:{radius_default:100,akurasi_maks:50,jam_mulai:'07:00',jam_selesai:'17:00',radius_min:30,radius_maks:300,lock_device_sales:true,live_refresh_sec:30}};
 var SKEY='checkin_gas_sesi_v1';
 var DKEY='checkin_gas_device_id_v1';
@@ -247,7 +262,7 @@ function isiDB(data){
   state.batas30Hari=data.batas30Hari||'';
   state.jumlahCheckinLama=Number(data.jumlahCheckinLama||0);
   if(state.batas30Hari&&state.tanggal&&state.tanggal<state.batas30Hari)state.tanggal=state.hariIni;
-  db.users=(data.users||[]).map(function(u){return {login:u.kode_sales,nama:u.nama,role:u.role,aktif:u.aktif,device_id:u.device_id||'',device_info:u.device_info||'',last_lat:(u.last_lat===''||u.last_lat==null)?null:Number(u.last_lat),last_lng:(u.last_lng===''||u.last_lng==null)?null:Number(u.last_lng),last_akurasi_m:(u.last_akurasi_m===''||u.last_akurasi_m==null)?null:Number(u.last_akurasi_m),last_loc_at:u.last_loc_at||''};});
+  db.users=(data.users||[]).map(function(u){return {login:u.kode_sales,nama:u.nama,email:u.email||'',area:u.area||'',role:u.role,aktif:u.aktif,device_id:u.device_id||'',device_info:u.device_info||'',last_lat:(u.last_lat===''||u.last_lat==null)?null:Number(u.last_lat),last_lng:(u.last_lng===''||u.last_lng==null)?null:Number(u.last_lng),last_akurasi_m:(u.last_akurasi_m===''||u.last_akurasi_m==null)?null:Number(u.last_akurasi_m),last_loc_at:u.last_loc_at||''};});
   db.outlets=(data.outlets||[]).map(mapOutlet);
   db.checkins=(data.checkins||[]).map(mapCheckin);
   db.aksesSPV=(data.aksesSPV||[]).map(function(a){
@@ -274,7 +289,14 @@ function tampilLoading(on){
 function jalankan(p){
   state.pesan=null;tampilLoading(true);
   return p.then(function(r){
-    if(r&&r.ok===false){state.pesan=r.msg||'Gagal';state.pesanTipe='err';return null;}
+    if(r&&r.ok===false){
+      if(r.status==='GAGAL_DEVICE'||(r.msg&&(r.msg.indexOf('perangkat lain')>=0||r.msg.indexOf('Sesi perangkat tidak valid')>=0))){
+        tampilLoading(false);
+        paksaLogoutSesi(r.msg);
+        return null;
+      }
+      state.pesan=r.msg||'Gagal';state.pesanTipe='err';return null;
+    }
     state.pesan=(r&&r.msg)?r.msg:'Tersimpan';state.pesanTipe='ok';
     return muatData();
   }).catch(function(e){
@@ -303,7 +325,7 @@ function logout(){
   hentikanTrackingSales();
   hentikanAutoRefreshLokasi();
   localStorage.removeItem(SKEY);
-  state.user=null;state.tab='toko';state.adminTab='titik';state.bosTab='tim';state.spvTab='tim';state.pesan=null;
+  state.user=null;state.tab='toko';state.adminTab='tim';state.bosTab='tim';state.spvTab='tim';state.pesan=null;
   state.pilihToko=null;state.lokasi=null;state.akurasi=null;state.gpsStatus='idle';state.gpsErr=null;state.konfirmasiToko=null;state.tokoPanel=null;state.cariToko='';state.csvPreview=null;state.csvNamaFile='';state.csvErr=null;state.petaSales=null;state.tanggal='';state.hariIni='';state.batas30Hari='';state.jumlahCheckinLama=0;state.liveSales=[];state.liveLastRefresh='';state.liveFokus=null;state.liveLoading=false;
   db.checkins=[];db.outlets=[];db.users=[];db.aksesSPV=[];db.audit=[];
   render();
@@ -412,12 +434,27 @@ function renderLogin(){
 var _salesTrackTimer=null;
 var _salesLastPingAt=0;
 
+function paksaLogoutSesi(pesan){
+  hentikanTrackingSales();
+  hentikanAutoRefreshLokasi();
+  localStorage.removeItem(SKEY);
+  state.user=null;state.tab='toko';state.adminTab='tim';state.bosTab='tim';state.spvTab='tim';
+  state.pilihToko=null;state.lokasi=null;state.akurasi=null;state.gpsStatus='idle';state.gpsErr=null;state.konfirmasiToko=null;
+  state.pesan=pesan||'Sesi berakhir. Silakan login ulang.';
+  state.pesanTipe='err';
+  render();
+}
+
 function kirimLokasiLive(lat,lng,ak,paksa){
   if(!state.user||state.user.role!=='SALES')return;
   var now=Date.now();
   if(!paksa&&(now-_salesLastPingAt)<25000)return;
   _salesLastPingAt=now;
-  api.updateLokasiSales(lat,lng,ak).catch(function(){});
+  api.updateLokasiSales(lat,lng,ak).then(function(r){
+    if(r&&r.ok===false&&r.msg&&(r.msg.indexOf('perangkat lain')>=0||r.msg.indexOf('tidak valid')>=0)){
+      paksaLogoutSesi(r.msg);
+    }
+  }).catch(function(){});
 }
 
 function mulaiTrackingSales(){
@@ -1152,6 +1189,46 @@ function pemilihTanggal(){
   return c;
 }
 
+function renderModalGantiPin(targetUser){
+  var bg=el('div',{class:'modal-bg'});
+  var box=el('div',{class:'modal-box'});
+  box.appendChild(el('h2',{},'Ganti PIN User'));
+  box.appendChild(el('div',{class:'muted',style:'margin-bottom:10px'},
+    'User: '+targetUser.login+' - '+targetUser.nama+' ('+targetUser.role+')'));
+  box.appendChild(el('div',{class:'label'},'PIN Baru (4-8 digit angka)'));
+  var inpPin=el('input',{type:'text',inputmode:'numeric',maxlength:'8',placeholder:'Masukkan PIN baru, contoh: 1234',autocomplete:'off'});
+  box.appendChild(inpPin);
+
+  var act=el('div',{class:'modal-actions'});
+  var btBatal=el('button',{class:'btn-ghost'},'Batal');
+  btBatal.addEventListener('click',function(){
+    state.pinModalUser=null;
+    render();
+  });
+  var btSimpan=el('button',{class:'btn-primary'},'Simpan PIN');
+  btSimpan.addEventListener('click',function(){
+    var v=String(inpPin.value||'').trim();
+    if(!/^[0-9]{4,8}$/.test(v)){
+      state.pesan='PIN harus 4-8 digit angka';
+      state.pesanTipe='err';
+      state.pinModalUser=null;
+      render();
+      return;
+    }
+    var kodeTarget=targetUser.login;
+    state.pinModalUser=null;
+    btSimpan.disabled=true;
+    btSimpan.textContent='Menyimpan...';
+    jalankan(api.resetPin(kodeTarget,v));
+  });
+  act.appendChild(btBatal);
+  act.appendChild(btSimpan);
+  box.appendChild(act);
+  bg.appendChild(box);
+  setTimeout(function(){try{inpPin.focus();}catch(e){}},20);
+  return bg;
+}
+
 function adminUser(){
   var w=el('div',{});
   var pb=pesanBox(); if(pb)w.appendChild(pb);
@@ -1160,12 +1237,12 @@ function adminUser(){
   var cLock=el('div',{class:'card'});
   var headLock=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px'});
   headLock.appendChild(el('div',{class:'label',style:'margin:0'},'Mode Lock Device (Kunci HP Sales)'));
-  headLock.appendChild(el('span',{class:'badge '+(lockOn?'b-hijau':'b-kuning')},lockOn?'AKTIF (1 AKUN = 1 HP)':'NONAKTIF (BEBAS LOGIN)'));
+  headLock.appendChild(el('span',{class:'badge '+(lockOn?'b-hijau':'b-kuning')},lockOn?'AKTIF (1 AKUN = 1 HP)':'NONAKTIF (SINGLE LOGIN TERBARU)'));
   cLock.appendChild(headLock);
   cLock.appendChild(el('div',{class:'muted'},
     lockOn
-      ? 'Aktif: Akun SALES terkunci pada 1 perangkat HP pertama yang dipakai login. ADMIN & SPV selalu bebas login di mana saja.'
-      : 'Nonaktif: Semua akun (termasuk SALES) sementara bebas login di perangkat mana saja tanpa kunci HP.'));
+      ? 'Aktif: Akun SALES terkunci permanen pada 1 HP pertama. Login dari HP lain ditolak sampai Admin klik Reset HP.'
+      : 'Nonaktif: Sales bisa pindah HP sendiri, namun jika terjadi double login hanya login TERBARU yang aktif (sesi lama otomatis keluar).'));
   var btLock=el('button',{class:lockOn?'btn-danger':'btn-primary',style:'margin-top:10px'},
     lockOn?'Nonaktifkan Lock Device':'Aktifkan Lock Device');
   btLock.addEventListener('click',function(){
@@ -1176,52 +1253,113 @@ function adminUser(){
   cLock.appendChild(btLock);
   w.appendChild(cLock);
 
-  var c0=el('div',{class:'card'});
-  c0.appendChild(el('div',{class:'label'},'Daftar user ('+db.users.length+')'));
-  c0.appendChild(el('div',{class:'muted'},'PIN hanya bisa direset, tidak bisa dilihat.'));
-  w.appendChild(c0);
   w.appendChild(adminFormUser());
-  db.users.forEach(function(u){
-    var c=el('div',{class:'card'});
-    var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
-    head.appendChild(el('strong',{},u.login));
-    head.appendChild(el('span',{class:'badge '+(u.aktif?'b-hijau':'b-merah')},u.aktif?'AKTIF':'NONAKTIF'));
-    c.appendChild(head);
-    c.appendChild(el('div',{},u.nama));
-    c.appendChild(el('div',{class:'muted'},u.role));
-    if(u.role!=='SALES'){
-      c.appendChild(el('div',{class:'muted',style:'margin-top:4px'},'Perangkat: Bebas login di mana saja'+(u.device_info?' (terakhir: '+u.device_info+')':'')));
-    }else if(u.device_id){
-      c.appendChild(el('div',{class:'ok',style:'margin-top:6px'},'Terikat HP: '+(u.device_info||u.device_id)+' ['+u.device_id.slice(0,12)+']'));
-      var btRstHp=el('button',{class:'btn-ghost',style:'width:100%;margin-top:6px'},'Reset Kunci HP');
-      btRstHp.addEventListener('click',function(){
-        btRstHp.disabled=true;btRstHp.textContent='Mereset HP...';
-        jalankan(api.resetPerangkat(u.login));
-      });
-      c.appendChild(btRstHp);
-    }else{
-      c.appendChild(el('div',{class:'muted',style:'margin-top:4px'},lockOn?'Perangkat: Belum terikat HP (akan terkunci saat login pertama)':'Perangkat: Lock Device sedang NONAKTIF'+(u.device_info?' (terakhir: '+u.device_info+')':'')));
-    }
-    var pin=el('input',{type:'text',inputmode:'numeric',placeholder:'PIN baru (4-8 digit)',style:'margin-top:8px'});
-    c.appendChild(pin);
-    var rp=el('button',{class:'btn-primary',style:'margin-top:8px'},'Reset PIN');
-    rp.addEventListener('click',function(){
-      var v=String(pin.value||'').trim();
-      if(!/^[0-9]{4,8}$/.test(v)){state.pesan='PIN harus 4-8 digit angka';state.pesanTipe='err';render();return;}
-      rp.disabled=true;rp.textContent='Menyimpan...';
-      jalankan(api.resetPin(u.login,v));
+
+  var cList=el('div',{class:'card'});
+  var headList=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap'});
+  headList.appendChild(el('div',{class:'label',style:'margin:0'},'Daftar User ('+db.users.length+')'));
+  var inCariUser=el('input',{placeholder:'Cari ID, nama, role, atau area...',value:state.cariUser||'',style:'max-width:260px;padding:7px 10px;font-size:12px'});
+  headList.appendChild(inCariUser);
+  cList.appendChild(headList);
+
+  var xlWrap=el('div',{class:'xl-wrap'});
+  var tbl=el('table',{class:'xl-tbl'});
+  var thead=el('thead',{},el('tr',{},
+    el('th',{style:'width:36px;text-align:center'},'No'),
+    el('th',{},'ID Login'),
+    el('th',{},'Nama'),
+    el('th',{},'Role'),
+    el('th',{},'Area'),
+    el('th',{},'Perangkat / Sesi'),
+    el('th',{style:'text-align:center'},'Aktif'),
+    el('th',{},'Aksi')
+  ));
+  var tbody=el('tbody',{});
+  tbl.appendChild(thead);
+  tbl.appendChild(tbody);
+  xlWrap.appendChild(tbl);
+  cList.appendChild(xlWrap);
+  w.appendChild(cList);
+
+  function renderRowsUser(q){
+    tbody.innerHTML='';
+    var key=String(q||'').trim().toLowerCase();
+    var filtered=db.users.filter(function(u){
+      if(!key)return true;
+      var hay=(u.login+' '+u.nama+' '+u.role+' '+(u.area||'')+' '+(u.device_info||'')).toLowerCase();
+      return hay.indexOf(key)>=0;
     });
-    c.appendChild(rp);
-    if(u.login!==state.user.kode){
-      var tg=el('button',{class:u.aktif?'btn-danger':'btn-ghost',style:'margin-top:8px'},u.aktif?'Nonaktifkan':'Aktifkan');
-      tg.addEventListener('click',function(){
-        tg.disabled=true;
-        jalankan(api.setUserAktif(u.login,!u.aktif));
-      });
-      c.appendChild(tg);
+    if(!filtered.length){
+      tbody.appendChild(el('tr',{},el('td',{colspan:'8',style:'text-align:center;color:var(--redup);padding:14px'},'Tidak ada user yang cocok')));
+      return;
     }
-    w.appendChild(c);
+    filtered.forEach(function(u,idx){
+      var tr=el('tr',{class:u.aktif?'':'xl-off'});
+      tr.appendChild(el('td',{style:'text-align:center;color:var(--redup)'},String(idx+1)));
+      tr.appendChild(el('td',{},el('strong',{},u.login)));
+      tr.appendChild(el('td',{},u.nama));
+      var rCls=(u.role==='ADMIN'?'b-merah':(u.role==='BOS'?'b-kuning':(u.role==='SPV'?'b-hijau':'b-abu')));
+      tr.appendChild(el('td',{},el('span',{class:'badge '+rCls},u.role)));
+      tr.appendChild(el('td',{},u.area||'-'));
+
+      var tdDev=el('td',{});
+      if(u.role!=='SALES'){
+        tdDev.appendChild(el('span',{class:'muted'},'Bebas'+(u.device_info?' ('+u.device_info+')':'')));
+      }else if(u.device_id){
+        tdDev.appendChild(el('div',{style:'font-size:11px;color:var(--hijau);font-weight:600'},u.device_info||u.device_id));
+      }else{
+        tdDev.appendChild(el('span',{class:'muted'},'Belum login'));
+      }
+      tr.appendChild(tdDev);
+
+      // Toggle Aktif / Nonaktif
+      var tdTog=el('td',{style:'text-align:center'});
+      var isSelf=(u.login===state.user.kode);
+      var chk=el('input',{type:'checkbox'});
+      chk.checked=!!u.aktif;
+      chk.disabled=isSelf;
+      chk.addEventListener('change',function(){
+        chk.disabled=true;
+        jalankan(api.setUserAktif(u.login,chk.checked));
+      });
+      var lblSw=el('label',{class:'sw',title:isSelf?'Tidak bisa menonaktifkan akun sendiri':(u.aktif?'Aktif (klik untuk nonaktifkan)':'Nonaktif (klik untuk aktifkan)')},
+        chk,el('span',{class:'sw-slider'}));
+      tdTog.appendChild(lblSw);
+      tr.appendChild(tdTog);
+
+      // Tombol Ganti PIN & Reset HP
+      var tdAct=el('td',{});
+      var boxAct=el('div',{class:'xl-act'});
+      var btPin=el('button',{class:'btn-primary btn-sm',style:'width:auto'},'Ganti PIN');
+      btPin.addEventListener('click',function(){
+        state.pinModalUser=u;
+        render();
+      });
+      boxAct.appendChild(btPin);
+      if(u.role==='SALES'&&u.device_id){
+        var btHp=el('button',{class:'btn-ghost btn-sm'},'Reset HP');
+        btHp.addEventListener('click',function(){
+          btHp.disabled=true;btHp.textContent='...';
+          jalankan(api.resetPerangkat(u.login));
+        });
+        boxAct.appendChild(btHp);
+      }
+      tdAct.appendChild(boxAct);
+      tr.appendChild(tdAct);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  inCariUser.addEventListener('input',function(){
+    state.cariUser=inCariUser.value;
+    renderRowsUser(inCariUser.value);
   });
+  renderRowsUser(state.cariUser);
+
+  if(state.pinModalUser){
+    w.appendChild(renderModalGantiPin(state.pinModalUser));
+  }
   return w;
 }
 

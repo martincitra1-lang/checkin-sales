@@ -1514,11 +1514,16 @@ function daftarSalesTim(semua){
   return db.users.filter(function(u){return u.role==='SALES'&&kode.indexOf(u.login)>=0;});
 }
 
+function jamKeDetik(j){
+  var p=String(j||'').trim().split(':');
+  return (Number(p[0])||0)*3600+(Number(p[1])||0)*60+(Number(p[2])||0);
+}
+
 function kunjunganUrutSales(kodeSales, tgl){
   return db.checkins.filter(function(c){
     return c.sales===kodeSales&&c.tanggal===tgl&&c.status_batal!=='BATAL';
   }).slice().sort(function(a,b){
-    return String(a.jam_masuk||'').localeCompare(String(b.jam_masuk||''));
+    return jamKeDetik(a.jam_masuk)-jamKeDetik(b.jam_masuk);
   });
 }
 

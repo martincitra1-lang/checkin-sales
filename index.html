@@ -66,7 +66,7 @@
 <div id="loading" style="position:fixed;inset:0;background:rgba(245,247,250,.9);display:none;align-items:center;justify-content:center;z-index:99;font-weight:600;color:#0F2C4C">Memuat...</div>
 <script>
 /* ===== ADAPTER SERVER ===== */
-var state={user:null,tab:'toko',adminTab:'titik',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,gpsStatus:'idle',gpsErr:null,konfirmasiToko:null,loading:true,tanggal:'',hariIni:'',pilihToko:null};
+var state={user:null,tab:'toko',adminTab:'titik',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,gpsStatus:'idle',gpsErr:null,konfirmasiToko:null,tokoPanel:null,cariToko:'',csvPreview:null,csvNamaFile:'',csvErr:null,loading:true,tanggal:'',hariIni:'',pilihToko:null};
 var db={outlets:[],checkins:[],users:[],aksesSPV:[],audit:[],settings:{radius_default:100,akurasi_maks:50,jam_mulai:'07:00',jam_selesai:'17:00',radius_min:30,radius_maks:300}};
 var SKEY='checkin_gas_sesi_v1';
 
@@ -98,7 +98,7 @@ function namaSales(kode){
 
 function mapOutlet(o){
   return {
-    kode:o.kode_toko, nama:o.nama_toko, alamat:o.alamat, kota:o.kota,
+    kode:o.kode_toko, nama:o.nama_toko, alamat:o.alamat, kota:o.kota, kecamatan:o.kecamatan||'',
     lat:(o.latitude===''||o.latitude==null)?null:Number(o.latitude),
     lng:(o.longitude===''||o.longitude==null)?null:Number(o.longitude),
     radius:(o.radius_m===''||o.radius_m==null)?null:Number(o.radius_m),
@@ -178,7 +178,7 @@ function cekAkses(kodeInput,pinInput){
 function logout(){
   localStorage.removeItem(SKEY);
   state.user=null;state.tab='toko';state.adminTab='titik';state.spvTab='tim';state.pesan=null;
-  state.pilihToko=null;state.lokasi=null;state.akurasi=null;state.gpsStatus='idle';state.gpsErr=null;state.konfirmasiToko=null;
+  state.pilihToko=null;state.lokasi=null;state.akurasi=null;state.gpsStatus='idle';state.gpsErr=null;state.konfirmasiToko=null;state.tokoPanel=null;state.cariToko='';state.csvPreview=null;state.csvNamaFile='';state.csvErr=null;
   db.checkins=[];db.outlets=[];db.users=[];db.aksesSPV=[];db.audit=[];
   render();
 }
@@ -201,6 +201,9 @@ var api={
   checkout:function(id){return panggil('checkout',[state.user.kode,id]);},
   setTitikToko:function(kode,lat,lng,radius){return panggil('setTitikToko',[state.user.kode,kode,lat,lng,radius]);},
   hapusTitikToko:function(kode){return panggil('hapusTitikToko',[state.user.kode,kode]);},
+  setRadiusSemuaToko:function(radius){return panggil('setRadiusSemuaToko',[state.user.kode,radius]);},
+  tambahToko:function(kodeToko,namaToko,alamat,kota,kecamatan,lat,lng,radius){return panggil('tambahToko',[state.user.kode,kodeToko,namaToko,alamat,kota,kecamatan,lat,lng,radius]);},
+  importToko:function(listToko){return panggil('importToko',[state.user.kode,listToko]);},
   batalKunjungan:function(id,alasan){return panggil('batalKunjungan',[state.user.kode,id,alasan]);},
   setAksesSPV:function(spv,kodeSales,aktif){return panggil('setAksesSPV',[state.user.kode,spv,kodeSales,aktif]);},
   resetPin:function(target,pin){return panggil('resetPin',[state.user.kode,target,pin]);},
@@ -482,17 +485,262 @@ function renderAdmin(){
   return w;
 }
 
+function parseCsvBaris(teks, delim){
+  var rows=[], cur=[], val='', inQ=false;
+  for(var i=0;i<teks.length;i++){
+    var ch=teks[i], nx=teks[i+1];
+    if(inQ){
+      if(ch==='"'&&nx==='"'){val+='"';i++;}
+      else if(ch==='"'){inQ=false;}
+      else{val+=ch;}
+    }else{
+      if(ch==='"'){inQ=true;}
+      else if(ch===delim){cur.push(val.trim());val='';}
+      else if(ch==='\r'&&nx==='\n'){cur.push(val.trim());rows.push(cur);cur=[];val='';i++;}
+      else if(ch==='\n'||ch==='\r'){cur.push(val.trim());rows.push(cur);cur=[];val='';}
+      else{val+=ch;}
+    }
+  }
+  if(val!==''||cur.length>0){cur.push(val.trim());rows.push(cur);}
+  return rows.filter(function(r){return r.some(function(x){return x!=='';});});
+}
+
+function parseCsvToko(raw){
+  var teks=String(raw||'').replace(/^\ufeff/,'').trim();
+  if(!teks)return {ok:false,msg:'File CSV kosong'};
+  var firstLine=teks.split(/\r?\n/)[0]||'';
+  var semiCount=(firstLine.match(/;/g)||[]).length;
+  var commaCount=(firstLine.match(/,/g)||[]).length;
+  var delim=semiCount>commaCount?';':',';
+  var rows=parseCsvBaris(teks,delim);
+  if(rows.length<2)return {ok:false,msg:'CSV harus memiliki baris header dan minimal 1 baris data'};
+
+  var norm=function(s){return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,'');};
+  var head=rows[0].map(norm);
+  var findCol=function(aliases){
+    for(var i=0;i<aliases.length;i++){
+      var idx=head.indexOf(aliases[i]);
+      if(idx>=0)return idx;
+    }
+    return -1;
+  };
+  var cKode=findCol(['kodetoko','kode','idtoko','id']);
+  var cNama=findCol(['namatoko','nama','toko','outlet','namaoutlet']);
+  var cAlamat=findCol(['alamat','address']);
+  var cKota=findCol(['kota','city','kabupaten']);
+  var cKec=findCol(['kecamatan','area','district']);
+  var cLat=findCol(['latitude','lat']);
+  var cLng=findCol(['longitude','lng','lon','long']);
+  var cRad=findCol(['radiusm','radius','radiusmaksmeter']);
+
+  if(cKode<0||cNama<0){
+    return {ok:false,msg:'Header CSV wajib memiliki kolom kode_toko dan nama_toko'};
+  }
+  var items=[];
+  for(var r=1;r<rows.length;r++){
+    var row=rows[r];
+    var kt=String(row[cKode]||'').trim().toUpperCase();
+    var nm=String(row[cNama]||'').trim();
+    if(!kt||!nm)continue;
+    items.push({
+      kode_toko:kt,
+      nama_toko:nm,
+      alamat:cAlamat>=0?(row[cAlamat]||''):'',
+      kota:cKota>=0?(row[cKota]||''):'',
+      kecamatan:cKec>=0?(row[cKec]||''):'',
+      latitude:cLat>=0?(row[cLat]||''):'',
+      longitude:cLng>=0?(row[cLng]||''):'',
+      radius_m:cRad>=0?(row[cRad]||''):''
+    });
+  }
+  if(!items.length)return {ok:false,msg:'Tidak ada baris toko yang valid (kode_toko dan nama_toko wajib terisi)'};
+  return {ok:true,items:items,delim:delim};
+}
+
+function adminFormTambahToko(){
+  var c=el('div',{class:'card'});
+  c.appendChild(el('div',{class:'label'},'Tambah Toko Baru'));
+  c.appendChild(el('div',{class:'muted',style:'margin-bottom:8px'},
+    'Kota dan kecamatan akan terisi otomatis dari Latitude & Longitude saat disimpan.'));
+  var fKode=el('input',{placeholder:'Kode toko (wajib), contoh: TKR-011'});
+  var fNama=el('input',{placeholder:'Nama toko (wajib)',style:'margin-top:8px'});
+  var fAlamat=el('input',{placeholder:'Alamat (opsional)',style:'margin-top:8px'});
+  var fLat=el('input',{type:'number',step:'0.000001',placeholder:'Latitude (opsional, kosongkan jika belum ada titik)',style:'margin-top:8px'});
+  var fLng=el('input',{type:'number',step:'0.000001',placeholder:'Longitude (opsional)',style:'margin-top:8px'});
+  var fRad=el('input',{type:'number',placeholder:'Radius meter (opsional, default '+db.settings.radius_default+')',style:'margin-top:8px'});
+  [fKode,fNama,fAlamat,fLat,fLng,fRad].forEach(function(x){c.appendChild(x);});
+
+  var act=el('div',{style:'display:flex;gap:8px;margin-top:10px'});
+  var btBatal=el('button',{class:'btn-ghost',style:'flex:1'},'Tutup');
+  btBatal.addEventListener('click',function(){state.tokoPanel=null;render();});
+  var btSimpan=el('button',{class:'btn-primary',style:'flex:2'},'Simpan Toko Baru');
+  btSimpan.addEventListener('click',function(){
+    var kt=String(fKode.value||'').trim().toUpperCase();
+    var nm=String(fNama.value||'').trim();
+    if(!kt){state.pesan='Kode toko wajib diisi';state.pesanTipe='err';render();return;}
+    if(!nm){state.pesan='Nama toko wajib diisi';state.pesanTipe='err';render();return;}
+    btSimpan.disabled=true;btSimpan.textContent='Menyimpan...';
+    jalankan(api.tambahToko(kt,nm,fAlamat.value,'','',fLat.value,fLng.value,fRad.value)).then(function(){
+      if(state.pesanTipe==='ok'){state.tokoPanel=null;render();}
+    });
+  });
+  act.appendChild(btBatal);act.appendChild(btSimpan);
+  c.appendChild(act);
+  return c;
+}
+
+function adminFormImportToko(){
+  var c=el('div',{class:'card'});
+  var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px'});
+  head.appendChild(el('div',{class:'label',style:'margin:0'},'Import Database Toko (CSV)'));
+  var btTpl=el('button',{class:'btn-ghost btn-sm'},'Unduh Template CSV');
+  btTpl.addEventListener('click',function(){
+    var tpl='kode_toko,nama_toko,alamat,kota,kecamatan,latitude,longitude,radius_m\n'+
+            'TKR-011,Toko Maju Jaya,Jl. Nagoya No. 10,Batam,Lubuk Baja,1.145600,104.012400,100\n'+
+            'TKR-012,Warung Berkah,Jl. Batam Center No. 5,Batam,Batam Kota,,,\n';
+    unduhCsv(tpl,'template-toko.csv');
+  });
+  head.appendChild(btTpl);
+  c.appendChild(head);
+
+  c.appendChild(el('div',{class:'muted',style:'margin-bottom:8px'},
+    'Kolom wajib: kode_toko, nama_toko. Kolom opsional: alamat, kota, kecamatan, latitude, longitude, radius_m. Mendukung pemisah koma (,) atau titik koma (;). Kode toko yang sudah ada otomatis dilewati.'));
+
+  var inpFile=el('input',{type:'file',accept:'.csv,text/csv'});
+  inpFile.addEventListener('change',function(){
+    var f=inpFile.files&&inpFile.files[0];
+    if(!f)return;
+    state.csvNamaFile=f.name;
+    state.csvErr=null;
+    state.csvPreview=null;
+    var reader=new FileReader();
+    reader.onload=function(ev){
+      var res=parseCsvToko(ev.target.result);
+      if(!res.ok){state.csvErr=res.msg;}
+      else{state.csvPreview=res.items;}
+      render();
+    };
+    reader.onerror=function(){state.csvErr='Gagal membaca file CSV';render();};
+    reader.readAsText(f,'UTF-8');
+  });
+  c.appendChild(inpFile);
+
+  if(state.csvNamaFile){
+    c.appendChild(el('div',{class:'muted',style:'margin-top:6px'},'File: '+state.csvNamaFile));
+  }
+  if(state.csvErr){
+    c.appendChild(el('div',{class:'err'},state.csvErr));
+  }
+
+  if(state.csvPreview&&state.csvPreview.length){
+    c.appendChild(el('div',{class:'ok'},'Siap diimport: '+state.csvPreview.length+' toko (menampilkan maks. 5 baris pertama)'));
+    var tbl=el('table',{style:'margin-top:6px'});
+    var thead=el('thead',{},el('tr',{},el('th',{},'Kode'),el('th',{},'Nama Toko'),el('th',{},'Kota'),el('th',{},'Titik GPS')));
+    var tbody=el('tbody',{});
+    state.csvPreview.slice(0,5).forEach(function(item){
+      var gps=(item.latitude&&item.longitude)?(item.latitude+', '+item.longitude):'Tanpa titik';
+      tbody.appendChild(el('tr',{},el('td',{},item.kode_toko),el('td',{},item.nama_toko),el('td',{},item.kota||'-'),el('td',{},gps)));
+    });
+    tbl.appendChild(thead);tbl.appendChild(tbody);
+    var tblWrap=el('div',{style:'overflow-x:auto'});
+    tblWrap.appendChild(tbl);
+    c.appendChild(tblWrap);
+  }
+
+  var act=el('div',{style:'display:flex;gap:8px;margin-top:10px'});
+  var btTutup=el('button',{class:'btn-ghost',style:'flex:1'},'Tutup');
+  btTutup.addEventListener('click',function(){
+    state.tokoPanel=null;state.csvPreview=null;state.csvNamaFile='';state.csvErr=null;
+    render();
+  });
+  var btImp=el('button',{class:'btn-primary',style:'flex:2',disabled:!(state.csvPreview&&state.csvPreview.length)},
+    (state.csvPreview&&state.csvPreview.length)?('Mulai Import ('+state.csvPreview.length+' Toko)'):'Pilih File CSV Dulu');
+  btImp.addEventListener('click',function(){
+    if(!state.csvPreview||!state.csvPreview.length)return;
+    var payload=state.csvPreview.slice();
+    btImp.disabled=true;btImp.textContent='Mengimport...';
+    jalankan(api.importToko(payload)).then(function(){
+      if(state.pesanTipe==='ok'){
+        state.tokoPanel=null;state.csvPreview=null;state.csvNamaFile='';state.csvErr=null;
+        render();
+      }
+    });
+  });
+  act.appendChild(btTutup);act.appendChild(btImp);
+  c.appendChild(act);
+  return c;
+}
+
 function adminTitik(){
   var w=el('div',{});
   var ada=db.outlets.filter(function(o){return adaTitik(o);}).length;
   var c=el('div',{class:'card'});
   c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Titik final'),el('span',{class:'v'},ada+' dari '+db.outlets.length)));
   c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Belum ada titik'),el('span',{class:'v'},String(db.outlets.length-ada))));
-  c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Radius sah'),el('span',{class:'v'},db.settings.radius_min+'-'+db.settings.radius_maks+' m')));
+  c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Radius sah'),el('span',{class:'v'},db.settings.radius_min+'-'+db.settings.radius_maks+' m (default '+db.settings.radius_default+' m)')));
+
+  var radBox=el('div',{style:'border-top:1px solid #eef2f7;margin-top:10px;padding-top:10px'});
+  radBox.appendChild(el('div',{class:'label'},'Ubah Radius Semua Toko (1 Klik)'));
+  var radBar=el('div',{style:'display:flex;gap:8px;align-items:center'});
+  var inRadAll=el('input',{type:'number',min:db.settings.radius_min,max:db.settings.radius_maks,value:db.settings.radius_default,placeholder:'Radius (m)',style:'max-width:130px'});
+  var btRadAll=el('button',{class:'btn-primary',style:'flex:1;padding:10px 12px'},'Terapkan ke Semua Toko ('+db.outlets.length+')');
+  btRadAll.addEventListener('click',function(){
+    var v=Number(inRadAll.value);
+    if(!v||v<db.settings.radius_min||v>db.settings.radius_maks){
+      state.pesan='Radius harus antara '+db.settings.radius_min+' dan '+db.settings.radius_maks+' m';
+      state.pesanTipe='err';render();return;
+    }
+    btRadAll.disabled=true;btRadAll.textContent='Menerapkan...';
+    jalankan(api.setRadiusSemuaToko(v));
+  });
+  radBar.appendChild(inRadAll);radBar.appendChild(btRadAll);
+  radBox.appendChild(radBar);
+  c.appendChild(radBox);
+
+  var bar=el('div',{style:'display:flex;gap:8px;margin-top:12px;flex-wrap:wrap'});
+  var btTambah=el('button',{class:state.tokoPanel==='tambah'?'btn-primary':'btn-ghost',style:'flex:1;min-width:140px'},'+ Tambah Toko Baru');
+  btTambah.addEventListener('click',function(){
+    state.tokoPanel=(state.tokoPanel==='tambah'?null:'tambah');
+    batalPesan();render();
+  });
+  var btImport=el('button',{class:state.tokoPanel==='import'?'btn-primary':'btn-ghost',style:'flex:1;min-width:140px'},'Import CSV Toko');
+  btImport.addEventListener('click',function(){
+    state.tokoPanel=(state.tokoPanel==='import'?null:'import');
+    batalPesan();render();
+  });
+  bar.appendChild(btTambah);bar.appendChild(btImport);
+  c.appendChild(bar);
   w.appendChild(c);
+
   var pb=pesanBox(); if(pb)w.appendChild(pb);
+  if(state.tokoPanel==='tambah')w.appendChild(adminFormTambahToko());
+  if(state.tokoPanel==='import')w.appendChild(adminFormImportToko());
+
+  var cCari=el('div',{class:'card'});
+  var inCari=el('input',{placeholder:'Cari kode toko, nama toko, alamat, atau kota...',value:state.cariToko||''});
+  cCari.appendChild(inCari);
+  w.appendChild(cCari);
+
   var grid=el('div',{class:'grid2'});
-  db.outlets.forEach(function(o){grid.appendChild(adminKartuToko(o));});
+  function renderGridToko(q){
+    grid.innerHTML='';
+    var key=String(q||'').trim().toLowerCase();
+    var filtered=db.outlets.filter(function(o){
+      if(!key)return true;
+      var hay=(o.kode+' '+o.nama+' '+o.alamat+' '+o.kota+' '+(o.kecamatan||'')).toLowerCase();
+      return hay.indexOf(key)>=0;
+    });
+    if(!filtered.length){
+      grid.appendChild(el('div',{class:'card muted'},'Tidak ada toko yang cocok dengan pencarian'));
+      return;
+    }
+    filtered.forEach(function(o){grid.appendChild(adminKartuToko(o));});
+  }
+  inCari.addEventListener('input',function(){
+    state.cariToko=inCari.value;
+    renderGridToko(inCari.value);
+  });
+  renderGridToko(state.cariToko);
   w.appendChild(grid);
   return w;
 }
@@ -504,7 +752,8 @@ function adminKartuToko(o){
   head.appendChild(el('span',{class:'badge '+(adaTitik(o)?'b-hijau':'b-kuning')},adaTitik(o)?'ADA TITIK':'TANPA TITIK'));
   c.appendChild(head);
   c.appendChild(el('div',{},o.nama));
-  c.appendChild(el('div',{class:'muted'},o.alamat+', '+o.kota));
+  var lokasiTeks=[o.alamat,o.kecamatan?'Kec. '+o.kecamatan:'',o.kota].filter(Boolean).join(', ');
+  if(lokasiTeks)c.appendChild(el('div',{class:'muted'},lokasiTeks));
   if(adaTitik(o)){
     c.appendChild(el('div',{class:'muted'},'Titik '+o.lat.toFixed(6)+', '+o.lng.toFixed(6)+' - radius '+o.radius+' m'));
   }else{
@@ -516,7 +765,7 @@ function adminKartuToko(o){
 
 function adminFormTitik(o){
   var c=el('div',{style:'border-top:1px solid #eef2f7;margin-top:10px;padding-top:10px'});
-  c.appendChild(el('div',{class:'label'},'Set titik '+o.kode));
+  c.appendChild(el('div',{class:'label'},'Set titik '+o.kode+' (Kota & Kecamatan otomatis dari GPS)'));
   var lat=el('input',{type:'number',step:'0.000001',placeholder:'latitude',value:o.lat!=null?o.lat:''});
   var lng=el('input',{type:'number',step:'0.000001',placeholder:'longitude',value:o.lng!=null?o.lng:''});
   var rad=el('input',{type:'number',placeholder:'radius meter',value:o.radius!=null?o.radius:db.settings.radius_default});

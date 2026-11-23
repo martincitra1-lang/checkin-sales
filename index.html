@@ -100,8 +100,8 @@
 <div id="loading" style="position:fixed;inset:0;background:rgba(245,247,250,.9);display:none;align-items:center;justify-content:center;z-index:99;font-weight:600;color:#0F2C4C">Memuat...</div>
 <script>
 /* ===== ADAPTER SERVER ===== */
-var state={user:null,tab:'toko',adminTab:'titik',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,gpsStatus:'idle',gpsErr:null,konfirmasiToko:null,tokoPanel:null,cariToko:'',csvPreview:null,csvNamaFile:'',csvErr:null,petaSales:null,batas30Hari:'',jumlahCheckinLama:0,liveAutoRefresh:true,liveSales:[],liveLastRefresh:'',liveFokus:null,liveLoading:false,loading:true,tanggal:'',hariIni:'',pilihToko:null};
-var db={outlets:[],checkins:[],users:[],aksesSPV:[],audit:[],settings:{radius_default:100,akurasi_maks:50,jam_mulai:'07:00',jam_selesai:'17:00',radius_min:30,radius_maks:300,lock_device_sales:true}};
+var state={user:null,tab:'toko',adminTab:'titik',bosTab:'tim',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,gpsStatus:'idle',gpsErr:null,konfirmasiToko:null,tokoPanel:null,cariToko:'',csvPreview:null,csvNamaFile:'',csvErr:null,petaSales:null,batas30Hari:'',jumlahCheckinLama:0,liveAutoRefresh:true,liveSales:[],liveLastRefresh:'',liveFokus:null,liveLoading:false,loading:true,tanggal:'',hariIni:'',pilihToko:null};
+var db={outlets:[],checkins:[],users:[],aksesSPV:[],audit:[],settings:{radius_default:100,akurasi_maks:50,jam_mulai:'07:00',jam_selesai:'17:00',radius_min:30,radius_maks:300,lock_device_sales:true,live_refresh_sec:30}};
 var SKEY='checkin_gas_sesi_v1';
 var DKEY='checkin_gas_device_id_v1';
 var _cachedDeviceInfo='';
@@ -241,7 +241,7 @@ function isiDB(data){
   var s=data.settings||{};
   db.settings={radius_default:s.radius_default_m||100,akurasi_maks:s.akurasi_maks_m||50,
     jam_mulai:s.jam_kerja_mulai||'07:00',jam_selesai:s.jam_kerja_selesai||'17:00',
-    radius_min:s.radius_min_m||30,radius_maks:s.radius_maks_m||300,lock_device_sales:s.lock_device_sales!==false};
+    radius_min:s.radius_min_m||30,radius_maks:s.radius_maks_m||300,lock_device_sales:s.lock_device_sales!==false,live_refresh_sec:Math.max(10,Number(s.live_refresh_sec)||30)};
   if(!state.tanggal)state.tanggal=data.tanggal||'';
   state.hariIni=data.tanggal||'';
   state.batas30Hari=data.batas30Hari||'';
@@ -303,7 +303,7 @@ function logout(){
   hentikanTrackingSales();
   hentikanAutoRefreshLokasi();
   localStorage.removeItem(SKEY);
-  state.user=null;state.tab='toko';state.adminTab='titik';state.spvTab='tim';state.pesan=null;
+  state.user=null;state.tab='toko';state.adminTab='titik';state.bosTab='tim';state.spvTab='tim';state.pesan=null;
   state.pilihToko=null;state.lokasi=null;state.akurasi=null;state.gpsStatus='idle';state.gpsErr=null;state.konfirmasiToko=null;state.tokoPanel=null;state.cariToko='';state.csvPreview=null;state.csvNamaFile='';state.csvErr=null;state.petaSales=null;state.tanggal='';state.hariIni='';state.batas30Hari='';state.jumlahCheckinLama=0;state.liveSales=[];state.liveLastRefresh='';state.liveFokus=null;state.liveLoading=false;
   db.checkins=[];db.outlets=[];db.users=[];db.aksesSPV=[];db.audit=[];
   render();
@@ -338,6 +338,7 @@ var api={
   resetPin:function(target,pin){return panggil('resetPin',[state.user.kode,target,pin]);},
   resetPerangkat:function(target){return panggil('resetPerangkat',[state.user.kode,target]);},
   setLockDevice:function(aktif){return panggil('setLockDevice',[state.user.kode,aktif]);},
+  setLiveRefreshInterval:function(detik){return panggil('setLiveRefreshInterval',[state.user.kode,detik]);},
   setUserAktif:function(target,aktif){return panggil('setUserAktif',[state.user.kode,target,aktif]);},
   exportRekap:function(tanggal){return panggil('exportRekap',[state.user.kode,tanggal]);},
   tambahUser:function(kodeSales,nama,email,role,area,pin){return panggil('tambahUser',[state.user.kode,nama,email,kodeSales,role,area,pin]);}
@@ -378,6 +379,7 @@ function render(){
   if(!state.user){app.appendChild(renderLogin());return;}
   if(state.user.role==='SALES'){app.appendChild(renderSales());return;}
   if(state.user.role==='ADMIN'){app.appendChild(renderAdmin());return;}
+  if(state.user.role==='BOS'){app.appendChild(renderBos());return;}
   app.appendChild(renderSpv());
 }
 
@@ -1100,7 +1102,7 @@ function adminFormUser(){
   var fEmail=el('input',{id:'nuEmail',placeholder:'Email (opsional)',style:'margin-top:8px'});
   var fArea=el('input',{id:'nuArea',placeholder:'Area (opsional)',style:'margin-top:8px'});
   var fRole=el('select',{id:'nuRole',style:'margin-top:8px'});
-  ['SALES','SPV','ADMIN'].forEach(function(r){fRole.appendChild(el('option',{value:r},r));});
+  ['SALES','SPV','BOS','ADMIN'].forEach(function(r){fRole.appendChild(el('option',{value:r},r));});
   var fPin=el('input',{id:'nuPin',inputmode:'numeric',placeholder:'PIN 4-8 digit',style:'margin-top:8px'});
   [fId,fNama,fEmail,fArea,fRole,fPin].forEach(function(x){c.appendChild(x);});
   var bt=el('button',{class:'btn-primary',style:'margin-top:8px'},'Simpan User');
@@ -1276,26 +1278,49 @@ function adminBoxHapusData(){
 
 var _petaLiveInstance=null;
 var _adminLiveTimer=null;
+var _adminLiveTimerSec=0;
+
+function sedangDiTabLokasi(){
+  if(!state.user)return false;
+  if(state.user.role==='ADMIN'&&state.adminTab==='lokasi')return true;
+  if(state.user.role==='BOS'&&state.bosTab==='lokasi')return true;
+  return false;
+}
+
+function pecahDetikHMS(totalSec){
+  var s=Math.max(0,Math.round(Number(totalSec)||0));
+  var jam=Math.floor(s/3600);
+  var menit=Math.floor((s%3600)/60);
+  var detik=s%60;
+  return {jam:jam,menit:menit,detik:detik};
+}
+
+function formatDurasiHMS(totalSec){
+  var p=pecahDetikHMS(totalSec);
+  return pad2(p.jam)+':'+pad2(p.menit)+':'+pad2(p.detik);
+}
 
 function hentikanAutoRefreshLokasi(){
-  if(_adminLiveTimer){clearInterval(_adminLiveTimer);_adminLiveTimer=null;}
+  if(_adminLiveTimer){clearInterval(_adminLiveTimer);_adminLiveTimer=null;_adminLiveTimerSec=0;}
 }
 
 function mulaiAutoRefreshLokasi(){
   hentikanAutoRefreshLokasi();
   if(!state.liveAutoRefresh)return;
+  var sec=Math.max(10,Number(db.settings.live_refresh_sec)||30);
+  _adminLiveTimerSec=sec;
   _adminLiveTimer=setInterval(function(){
-    if(!state.user||state.user.role!=='ADMIN'||state.adminTab!=='lokasi'){
+    if(!sedangDiTabLokasi()){
       hentikanAutoRefreshLokasi();
       return;
     }
     if(document.visibilityState==='hidden')return;
     muatLokasiLive(true);
-  },30000);
+  },sec*1000);
 }
 
 function muatLokasiLive(senyap){
-  if(!state.user||state.user.role!=='ADMIN')return;
+  if(!state.user||(state.user.role!=='ADMIN'&&state.user.role!=='BOS'))return;
   if(state.liveLoading)return;
   state.liveLoading=true;
   if(!senyap)render();
@@ -1318,10 +1343,10 @@ function muatLokasiLive(senyap){
       });
       state.liveLastRefresh=r.server_time||'';
     }
-    if(state.adminTab==='lokasi')render();
+    if(sedangDiTabLokasi())render();
   }).catch(function(){
     state.liveLoading=false;
-    if(!senyap&&state.adminTab==='lokasi')render();
+    if(!senyap&&sedangDiTabLokasi())render();
   });
 }
 
@@ -1388,8 +1413,9 @@ function gambarPetaLive(containerId, list){
   setTimeout(function(){try{map.invalidateSize();}catch(e){}},150);
 }
 
-function adminLokasi(){
-  if(state.liveAutoRefresh&&!_adminLiveTimer){mulaiAutoRefreshLokasi();}
+function adminLokasi(isBos){
+  var curSec=Math.max(10,Number(db.settings.live_refresh_sec)||30);
+  if(state.liveAutoRefresh&&(!_adminLiveTimer||_adminLiveTimerSec!==curSec)){mulaiAutoRefreshLokasi();}
   var w=el('div',{});
 
   var list=state.liveSales.length
@@ -1408,9 +1434,10 @@ function adminLokasi(){
   var h0=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px'});
   h0.appendChild(el('div',{class:'label',style:'margin:0'},'Lokasi Terbaru Sales (Live Update)'));
   h0.appendChild(el('span',{class:'badge '+(state.liveAutoRefresh?'b-hijau':'b-abu')},
-    state.liveAutoRefresh?'AUTO UPDATE 30 DETIK':'AUTO UPDATE OFF'));
+    state.liveAutoRefresh?('AUTO UPDATE '+formatDurasiHMS(curSec)):'AUTO UPDATE OFF'));
   c0.appendChild(h0);
   c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Sales terdeteksi'),el('span',{class:'v'},terdeteksi+' dari '+list.length)));
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Interval auto-update'),el('span',{class:'v'},formatDurasiHMS(curSec)+' ('+curSec+' dtk)')));
   c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Terakhir refresh'),el('span',{class:'v'},state.liveLastRefresh||(state.liveLoading?'Memuat...':'-'))));
 
   var bar=el('div',{style:'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap'});
@@ -1427,6 +1454,40 @@ function adminLokasi(){
   });
   bar.appendChild(btRef);bar.appendChild(btAuto);
   c0.appendChild(bar);
+
+  if(!isBos){
+    var hms=pecahDetikHMS(curSec);
+    var setBox=el('div',{style:'border-top:1px solid #eef2f7;margin-top:12px;padding-top:10px'});
+    setBox.appendChild(el('div',{class:'label'},'Setting Interval Auto-Update (Jam : Menit : Detik)'));
+    var rowHMS=el('div',{style:'display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px'});
+    var inJam=el('input',{type:'number',min:'0',max:'24',value:String(hms.jam),placeholder:'Jam'});
+    var inMnt=el('input',{type:'number',min:'0',max:'59',value:String(hms.menit),placeholder:'Menit'});
+    var inDtk=el('input',{type:'number',min:'0',max:'59',value:String(hms.detik),placeholder:'Detik'});
+    var bJam=el('div',{},el('div',{class:'muted',style:'margin-bottom:4px'},'Jam'),inJam);
+    var bMnt=el('div',{},el('div',{class:'muted',style:'margin-bottom:4px'},'Menit'),inMnt);
+    var bDtk=el('div',{},el('div',{class:'muted',style:'margin-bottom:4px'},'Detik'),inDtk);
+    rowHMS.appendChild(bJam);rowHMS.appendChild(bMnt);rowHMS.appendChild(bDtk);
+    setBox.appendChild(rowHMS);
+    var btSaveInt=el('button',{class:'btn-primary',style:'margin-top:8px'},'Simpan Interval Auto-Update');
+    btSaveInt.addEventListener('click',function(){
+      var j=Math.max(0,parseInt(inJam.value||'0',10)||0);
+      var m=Math.max(0,parseInt(inMnt.value||'0',10)||0);
+      var d=Math.max(0,parseInt(inDtk.value||'0',10)||0);
+      var total=j*3600+m*60+d;
+      if(total<10||total>86400){
+        state.pesan='Interval harus antara 10 detik sampai 24 jam (00:00:10 - 24:00:00)';
+        state.pesanTipe='err';render();return;
+      }
+      btSaveInt.disabled=true;btSaveInt.textContent='Menyimpan...';
+      jalankan(api.setLiveRefreshInterval(total)).then(function(){
+        if(state.liveAutoRefresh){mulaiAutoRefreshLokasi();}
+      });
+    });
+    setBox.appendChild(btSaveInt);
+    setBox.appendChild(el('div',{class:'muted',style:'margin-top:6px'},'Minimal 10 detik agar server Google Sheets tidak overload. Berlaku untuk Admin & Bos.'));
+    c0.appendChild(setBox);
+  }
+
   w.appendChild(c0);
 
   var pb=pesanBox(); if(pb)w.appendChild(pb);
@@ -1487,6 +1548,35 @@ function adminTim(){
   w.appendChild(pemilihTanggal());
   w.appendChild(layarTim(true));
   w.appendChild(adminBoxHapusData());
+  return w;
+}
+
+function renderBos(){
+  if(state.bosTab!=='lokasi'){hentikanAutoRefreshLokasi();}
+  var w=el('div',{class:'wrap wide'});
+  w.appendChild(el('header',{class:'app'},el('h1',{},state.user.nama),el('div',{class:'sub'},'Bos / Pimpinan - '+state.user.kode)));
+  if(state.bosTab==='tim'){
+    w.appendChild(pemilihTanggal());
+    w.appendChild(layarTim(true));
+  }
+  if(state.bosTab==='lokasi'){
+    w.appendChild(adminLokasi(true));
+  }
+  var nav=el('div',{class:'nav wide'});
+  [['tim','Tim'],['lokasi','Lokasi']].forEach(function(p){
+    var b=el('button',{class:state.bosTab===p[0]?'on':''},p[1]);
+    b.addEventListener('click',function(){
+      state.bosTab=p[0];
+      batalPesan();
+      if(p[0]==='lokasi'){muatLokasiLive(false);}
+      render();
+    });
+    nav.appendChild(b);
+  });
+  var out=el('button',{},'Keluar');
+  out.addEventListener('click',function(){logout();});
+  nav.appendChild(out);
+  w.appendChild(nav);
   return w;
 }
 

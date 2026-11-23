@@ -85,7 +85,7 @@
 <script>
 /* ===== ADAPTER SERVER ===== */
 var state={user:null,tab:'toko',adminTab:'titik',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,gpsStatus:'idle',gpsErr:null,konfirmasiToko:null,tokoPanel:null,cariToko:'',csvPreview:null,csvNamaFile:'',csvErr:null,loading:true,tanggal:'',hariIni:'',pilihToko:null};
-var db={outlets:[],checkins:[],users:[],aksesSPV:[],audit:[],settings:{radius_default:100,akurasi_maks:50,jam_mulai:'07:00',jam_selesai:'17:00',radius_min:30,radius_maks:300}};
+var db={outlets:[],checkins:[],users:[],aksesSPV:[],audit:[],settings:{radius_default:100,akurasi_maks:50,jam_mulai:'07:00',jam_selesai:'17:00',radius_min:30,radius_maks:300,lock_device_sales:true}};
 var SKEY='checkin_gas_sesi_v1';
 var DKEY='checkin_gas_device_id_v1';
 var _cachedDeviceInfo='';
@@ -223,7 +223,7 @@ function isiDB(data){
   var s=data.settings||{};
   db.settings={radius_default:s.radius_default_m||100,akurasi_maks:s.akurasi_maks_m||50,
     jam_mulai:s.jam_kerja_mulai||'07:00',jam_selesai:s.jam_kerja_selesai||'17:00',
-    radius_min:s.radius_min_m||30,radius_maks:s.radius_maks_m||300};
+    radius_min:s.radius_min_m||30,radius_maks:s.radius_maks_m||300,lock_device_sales:s.lock_device_sales!==false};
   state.tanggal=data.tanggal||'';
   state.hariIni=data.tanggal||'';
   db.users=(data.users||[]).map(function(u){return {login:u.kode_sales,nama:u.nama,role:u.role,aktif:u.aktif,device_id:u.device_id||'',device_info:u.device_info||''};});
@@ -311,6 +311,7 @@ var api={
   setAksesSPV:function(spv,kodeSales,aktif){return panggil('setAksesSPV',[state.user.kode,spv,kodeSales,aktif]);},
   resetPin:function(target,pin){return panggil('resetPin',[state.user.kode,target,pin]);},
   resetPerangkat:function(target){return panggil('resetPerangkat',[state.user.kode,target]);},
+  setLockDevice:function(aktif){return panggil('setLockDevice',[state.user.kode,aktif]);},
   setUserAktif:function(target,aktif){return panggil('setUserAktif',[state.user.kode,target,aktif]);},
   exportRekap:function(tanggal){return panggil('exportRekap',[state.user.kode,tanggal]);},
   tambahUser:function(kodeSales,nama,email,role,area,pin){return panggil('tambahUser',[state.user.kode,nama,email,kodeSales,role,area,pin]);}
@@ -1078,6 +1079,27 @@ function pemilihTanggal(){
 function adminUser(){
   var w=el('div',{});
   var pb=pesanBox(); if(pb)w.appendChild(pb);
+
+  var lockOn=db.settings.lock_device_sales!==false;
+  var cLock=el('div',{class:'card'});
+  var headLock=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px'});
+  headLock.appendChild(el('div',{class:'label',style:'margin:0'},'Mode Lock Device (Kunci HP Sales)'));
+  headLock.appendChild(el('span',{class:'badge '+(lockOn?'b-hijau':'b-kuning')},lockOn?'AKTIF (1 AKUN = 1 HP)':'NONAKTIF (BEBAS LOGIN)'));
+  cLock.appendChild(headLock);
+  cLock.appendChild(el('div',{class:'muted'},
+    lockOn
+      ? 'Aktif: Akun SALES terkunci pada 1 perangkat HP pertama yang dipakai login. ADMIN & SPV selalu bebas login di mana saja.'
+      : 'Nonaktif: Semua akun (termasuk SALES) sementara bebas login di perangkat mana saja tanpa kunci HP.'));
+  var btLock=el('button',{class:lockOn?'btn-danger':'btn-primary',style:'margin-top:10px'},
+    lockOn?'Nonaktifkan Lock Device':'Aktifkan Lock Device');
+  btLock.addEventListener('click',function(){
+    btLock.disabled=true;
+    btLock.textContent='Menyimpan...';
+    jalankan(api.setLockDevice(!lockOn));
+  });
+  cLock.appendChild(btLock);
+  w.appendChild(cLock);
+
   var c0=el('div',{class:'card'});
   c0.appendChild(el('div',{class:'label'},'Daftar user ('+db.users.length+')'));
   c0.appendChild(el('div',{class:'muted'},'PIN hanya bisa direset, tidak bisa dilihat.'));
@@ -1102,7 +1124,7 @@ function adminUser(){
       });
       c.appendChild(btRstHp);
     }else{
-      c.appendChild(el('div',{class:'muted',style:'margin-top:4px'},'Perangkat: Belum terikat HP (akan terkunci saat login pertama)'));
+      c.appendChild(el('div',{class:'muted',style:'margin-top:4px'},lockOn?'Perangkat: Belum terikat HP (akan terkunci saat login pertama)':'Perangkat: Lock Device sedang NONAKTIF'+(u.device_info?' (terakhir: '+u.device_info+')':'')));
     }
     var pin=el('input',{type:'text',inputmode:'numeric',placeholder:'PIN baru (4-8 digit)',style:'margin-top:8px'});
     c.appendChild(pin);

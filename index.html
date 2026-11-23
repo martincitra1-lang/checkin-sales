@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Check-In Sales</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
   :root{--biru:#0F2C4C;--aksen:#1D6FE0;--hijau:#12855B;--merah:#C7382E;--latar:#F5F7FA;--garis:#dde3ea;--teks:#1a2028;--redup:#6b7684}
   *{box-sizing:border-box}
@@ -77,6 +79,16 @@
   .dd-item.on .dd-main{color:var(--aksen)}
   .dd-item .dd-sub{font-size:11px;color:var(--redup);margin-top:2px}
   .dd-empty{padding:12px;text-align:center;color:var(--redup);font-size:12px}
+  .map-box{width:100%;height:360px;border-radius:10px;border:1px solid var(--garis);overflow:hidden;background:#e9eef5;margin-top:8px;z-index:1}
+  .pin-num{width:28px;height:28px;border-radius:50%;color:#fff;font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}
+  .pin-start{background:#12855B}
+  .pin-mid{background:#1D6FE0}
+  .pin-end{background:#C7382E}
+  .rute-list{margin-top:10px;border-top:1px solid #eef2f7;padding-top:8px}
+  .rute-step{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #f0f3f7}
+  .rute-step:last-child{border-bottom:none}
+  .rute-no{width:24px;height:24px;border-radius:50%;color:#fff;font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:2px}
+  .btn-link{display:inline-block;text-align:center;text-decoration:none;font:inherit;font-weight:600;border-radius:8px;padding:10px 12px;background:#12855B;color:#fff;width:100%;margin-top:10px}
 </style>
 </head>
 <body>
@@ -84,7 +96,7 @@
 <div id="loading" style="position:fixed;inset:0;background:rgba(245,247,250,.9);display:none;align-items:center;justify-content:center;z-index:99;font-weight:600;color:#0F2C4C">Memuat...</div>
 <script>
 /* ===== ADAPTER SERVER ===== */
-var state={user:null,tab:'toko',adminTab:'titik',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,gpsStatus:'idle',gpsErr:null,konfirmasiToko:null,tokoPanel:null,cariToko:'',csvPreview:null,csvNamaFile:'',csvErr:null,loading:true,tanggal:'',hariIni:'',pilihToko:null};
+var state={user:null,tab:'toko',adminTab:'titik',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,gpsStatus:'idle',gpsErr:null,konfirmasiToko:null,tokoPanel:null,cariToko:'',csvPreview:null,csvNamaFile:'',csvErr:null,petaSales:null,batas30Hari:'',jumlahCheckinLama:0,loading:true,tanggal:'',hariIni:'',pilihToko:null};
 var db={outlets:[],checkins:[],users:[],aksesSPV:[],audit:[],settings:{radius_default:100,akurasi_maks:50,jam_mulai:'07:00',jam_selesai:'17:00',radius_min:30,radius_maks:300,lock_device_sales:true}};
 var SKEY='checkin_gas_sesi_v1';
 var DKEY='checkin_gas_device_id_v1';
@@ -212,6 +224,8 @@ function mapCheckin(c){
     checkin_id:c.checkin_id, tanggal:String(c.tanggal), sales:c.kode_sales, nama_sales:namaSales(c.kode_sales),
     kode_toko:c.kode_toko, nama_toko:c.nama_toko_snapshot,
     jam_masuk:c.jam_masuk, jam_keluar:c.jam_keluar||'',
+    lat:(c.latitude_sales===''||c.latitude_sales==null)?null:Number(c.latitude_sales),
+    lng:(c.longitude_sales===''||c.longitude_sales==null)?null:Number(c.longitude_sales),
     akurasi_m:(c.akurasi_m===''||c.akurasi_m==null)?null:Number(c.akurasi_m),
     jarak_m:(c.jarak_m===''||c.jarak_m==null)?null:Number(c.jarak_m),
     validasi_status:c.validasi_status, status_batal:c.status_batal||'AKTIF',
@@ -224,8 +238,11 @@ function isiDB(data){
   db.settings={radius_default:s.radius_default_m||100,akurasi_maks:s.akurasi_maks_m||50,
     jam_mulai:s.jam_kerja_mulai||'07:00',jam_selesai:s.jam_kerja_selesai||'17:00',
     radius_min:s.radius_min_m||30,radius_maks:s.radius_maks_m||300,lock_device_sales:s.lock_device_sales!==false};
-  state.tanggal=data.tanggal||'';
+  if(!state.tanggal)state.tanggal=data.tanggal||'';
   state.hariIni=data.tanggal||'';
+  state.batas30Hari=data.batas30Hari||'';
+  state.jumlahCheckinLama=Number(data.jumlahCheckinLama||0);
+  if(state.batas30Hari&&state.tanggal&&state.tanggal<state.batas30Hari)state.tanggal=state.hariIni;
   db.users=(data.users||[]).map(function(u){return {login:u.kode_sales,nama:u.nama,role:u.role,aktif:u.aktif,device_id:u.device_id||'',device_info:u.device_info||''};});
   db.outlets=(data.outlets||[]).map(mapOutlet);
   db.checkins=(data.checkins||[]).map(mapCheckin);
@@ -281,7 +298,7 @@ function cekAkses(kodeInput,pinInput){
 function logout(){
   localStorage.removeItem(SKEY);
   state.user=null;state.tab='toko';state.adminTab='titik';state.spvTab='tim';state.pesan=null;
-  state.pilihToko=null;state.lokasi=null;state.akurasi=null;state.gpsStatus='idle';state.gpsErr=null;state.konfirmasiToko=null;state.tokoPanel=null;state.cariToko='';state.csvPreview=null;state.csvNamaFile='';state.csvErr=null;
+  state.pilihToko=null;state.lokasi=null;state.akurasi=null;state.gpsStatus='idle';state.gpsErr=null;state.konfirmasiToko=null;state.tokoPanel=null;state.cariToko='';state.csvPreview=null;state.csvNamaFile='';state.csvErr=null;state.petaSales=null;state.tanggal='';state.hariIni='';state.batas30Hari='';state.jumlahCheckinLama=0;
   db.checkins=[];db.outlets=[];db.users=[];db.aksesSPV=[];db.audit=[];
   render();
 }
@@ -308,6 +325,7 @@ var api={
   tambahToko:function(kodeToko,namaToko,alamat,kota,kecamatan,lat,lng,radius){return panggil('tambahToko',[state.user.kode,kodeToko,namaToko,alamat,kota,kecamatan,lat,lng,radius]);},
   importToko:function(listToko){return panggil('importToko',[state.user.kode,listToko]);},
   batalKunjungan:function(id,alasan){return panggil('batalKunjungan',[state.user.kode,id,alasan]);},
+  hapusDataSampaiTanggal:function(sampaiTanggal){return panggil('hapusDataSampaiTanggal',[state.user.kode,sampaiTanggal]);},
   setAksesSPV:function(spv,kodeSales,aktif){return panggil('setAksesSPV',[state.user.kode,spv,kodeSales,aktif]);},
   resetPin:function(target,pin){return panggil('resetPin',[state.user.kode,target,pin]);},
   resetPerangkat:function(target){return panggil('resetPerangkat',[state.user.kode,target]);},
@@ -636,13 +654,14 @@ function layarRiwayat(){
 function renderAdmin(){
   var w=el('div',{class:'wrap wide'});
   w.appendChild(el('header',{class:'app'},el('h1',{},state.user.nama),el('div',{class:'sub'},'Admin Pusat - '+state.user.kode)));
+  if(state.adminTab==='tim')w.appendChild(adminTim());
   if(state.adminTab==='titik')w.appendChild(adminTitik());
   if(state.adminTab==='kunjungan')w.appendChild(adminKunjungan());
   if(state.adminTab==='akses')w.appendChild(adminAkses());
   if(state.adminTab==='user')w.appendChild(adminUser());
   if(state.adminTab==='audit')w.appendChild(adminAudit());
   var nav=el('div',{class:'nav wide'});
-  [['titik','Titik'],['kunjungan','Kunjungan'],['akses','Akses SPV'],['user','User'],['audit','Audit']].forEach(function(p){
+  [['tim','Tim'],['titik','Titik'],['kunjungan','Kunjungan'],['akses','Akses SPV'],['user','User'],['audit','Audit']].forEach(function(p){
     var b=el('button',{class:state.adminTab===p[0]?'on':''},p[1]);
     b.addEventListener('click',function(){state.adminTab=p[0];batalPesan();render();});
     nav.appendChild(b);
@@ -971,6 +990,7 @@ function adminKunjungan(){
   c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Masih di toko'),el('span',{class:'v'},String(list.filter(function(x){return !x.jam_keluar&&x.status_batal!=='BATAL';}).length))));
   w.appendChild(c0);
   w.appendChild(pemilihTanggal());
+  w.appendChild(adminBoxHapusData());
   var pb=pesanBox(); if(pb)w.appendChild(pb);
   if(!list.length){w.appendChild(el('div',{class:'card muted'},'Belum ada kunjungan hari ini'));return w;}
   var grid=el('div',{class:'grid2'});
@@ -1061,18 +1081,30 @@ function adminFormUser(){
 
 function pemilihTanggal(){
   var c=el('div',{class:'card'});
-  c.appendChild(el('div',{class:'label'},'Tanggal laporan'));
-  var inp=el('input',{type:'date',value:state.tanggal});
+  c.appendChild(el('div',{class:'label'},'Tanggal laporan (30 hari terakhir)'));
+  var attrs={type:'date',value:state.tanggal};
+  if(state.batas30Hari)attrs.min=state.batas30Hari;
+  if(state.hariIni)attrs.max=state.hariIni;
+  var inp=el('input',attrs);
   inp.addEventListener('change',function(){
     if(!inp.value)return;
+    if(state.batas30Hari&&inp.value<state.batas30Hari){
+      state.pesan='Data hanya ditampilkan untuk 30 hari terakhir (mulai '+state.batas30Hari+')';
+      state.pesanTipe='err';render();return;
+    }
     state.tanggal=inp.value;batalPesan();render();
   });
   c.appendChild(inp);
-  var bt=el('button',{class:'btn-ghost',style:'margin-top:8px'},'Hari ini');
+  var rowB=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap'});
+  var bt=el('button',{class:'btn-ghost'},'Hari ini');
   bt.addEventListener('click',function(){
     state.tanggal=state.hariIni||state.tanggal;batalPesan();render();
   });
-  c.appendChild(bt);
+  rowB.appendChild(bt);
+  if(state.batas30Hari){
+    rowB.appendChild(el('span',{class:'muted'},'Rentang data: '+state.batas30Hari+' s/d '+(state.hariIni||state.tanggal)));
+  }
+  c.appendChild(rowB);
   return c;
 }
 
@@ -1169,24 +1201,54 @@ function adminAudit(){
   return w;
 }
 
-/* ===== SPV ===== */
+/* ===== TIM, PETA RUTE GOOGLE MAPS & SPV ===== */
+var _petaInstance=null;
+
 function salesUntukSPV(login){
   return db.aksesSPV.filter(function(a){return a.spv===login&&a.aktif;}).map(function(a){return a.kode_sales;});
+}
+
+function adminBoxHapusData(){
+  var c=el('div',{class:'card'});
+  c.appendChild(el('div',{class:'label'},'Hapus Data Check-In (Khusus Admin)'));
+  c.appendChild(el('div',{class:'muted',style:'margin-bottom:8px'},
+    'Data tampilan aplikasi dibatasi 30 hari terakhir'+(state.batas30Hari?' (mulai '+state.batas30Hari+')':'')+
+    '. Pilih batas tanggal di bawah untuk menghapus permanen data check-in dari Google Sheets sampai tanggal tersebut.'+
+    (state.jumlahCheckinLama>0?' Saat ini ada '+state.jumlahCheckinLama+' baris data yang lebih lama dari 30 hari di Sheets.':'')));
+  var row=el('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap'});
+  var inpTgl=el('input',{type:'date',value:state.batas30Hari||state.tanggal,style:'flex:1;min-width:160px'});
+  var btHapus=el('button',{class:'btn-danger',style:'flex:1;min-width:200px'},'Hapus Data Sampai Tanggal Ini');
+  btHapus.addEventListener('click',function(){
+    var t=String(inpTgl.value||'').trim();
+    if(!t){state.pesan='Pilih tanggal batas hapus terlebih dahulu';state.pesanTipe='err';render();return;}
+    if(!window.confirm('Yakin ingin menghapus PERMANEN semua data check-in pada atau sebelum tanggal '+t+'? Data yang dihapus tidak dapat dikembalikan.')){
+      return;
+    }
+    btHapus.disabled=true;btHapus.textContent='Menghapus...';
+    jalankan(api.hapusDataSampaiTanggal(t));
+  });
+  row.appendChild(inpTgl);row.appendChild(btHapus);
+  c.appendChild(row);
+  return c;
+}
+
+function adminTim(){
+  var w=el('div',{});
+  w.appendChild(pemilihTanggal());
+  w.appendChild(layarTim(true));
+  w.appendChild(adminBoxHapusData());
+  return w;
 }
 
 function renderSpv(){
   var w=el('div',{class:'wrap wide'});
   w.appendChild(el('header',{class:'app'},el('h1',{},state.user.nama),el('div',{class:'sub'},'Supervisor - '+state.user.kode)));
   w.appendChild(pemilihTanggal());
-  if(state.spvTab==='tim')w.appendChild(spvTim());
-  if(state.spvTab==='rekap')w.appendChild(spvRekap());
-  if(state.spvTab==='toko')w.appendChild(spvToko());
+  w.appendChild(layarTim(false));
   var nav=el('div',{class:'nav wide'});
-  [['tim','Tim'],['rekap','Rekap'],['toko','Toko']].forEach(function(p){
-    var b=el('button',{class:state.spvTab===p[0]?'on':''},p[1]);
-    b.addEventListener('click',function(){state.spvTab=p[0];batalPesan();render();});
-    nav.appendChild(b);
-  });
+  var bTim=el('button',{class:'on'},'Tim');
+  bTim.addEventListener('click',function(){batalPesan();render();});
+  nav.appendChild(bTim);
   var out=el('button',{},'Keluar');
   out.addEventListener('click',function(){logout();});
   nav.appendChild(out);
@@ -1194,20 +1256,195 @@ function renderSpv(){
   return w;
 }
 
-function spvSalesList(){
+function daftarSalesTim(semua){
+  if(semua){
+    return db.users.filter(function(u){return u.role==='SALES';});
+  }
   var kode=salesUntukSPV(state.user.kode);
   return db.users.filter(function(u){return u.role==='SALES'&&kode.indexOf(u.login)>=0;});
 }
 
-function spvTim(){
+function kunjunganUrutSales(kodeSales, tgl){
+  return db.checkins.filter(function(c){
+    return c.sales===kodeSales&&c.tanggal===tgl&&c.status_batal!=='BATAL';
+  }).slice().sort(function(a,b){
+    return String(a.jam_masuk||'').localeCompare(String(b.jam_masuk||''));
+  });
+}
+
+function koordinatKunjungan(c){
+  if(c.lat!=null&&c.lng!=null&&isFinite(c.lat)&&isFinite(c.lng)&&!(c.lat===0&&c.lng===0)){
+    return {lat:c.lat,lng:c.lng};
+  }
+  var o=outletByKode(c.kode_toko);
+  if(o&&o.lat!=null&&o.lng!=null&&isFinite(o.lat)&&isFinite(o.lng)){
+    return {lat:o.lat,lng:o.lng};
+  }
+  return null;
+}
+
+function linkGoogleMapsRute(titikList){
+  if(!titikList.length)return '';
+  if(titikList.length===1){
+    return 'https://www.google.com/maps/search/?api=1&query='+titikList[0].lat+','+titikList[0].lng;
+  }
+  var parts=titikList.slice(0,25).map(function(p){return p.lat.toFixed(6)+','+p.lng.toFixed(6);});
+  return 'https://www.google.com/maps/dir/'+parts.join('/');
+}
+
+function gambarPetaRute(containerId, kunjunganList){
+  if(_petaInstance){
+    try{_petaInstance.remove();}catch(e){}
+    _petaInstance=null;
+  }
+  var elMap=document.getElementById(containerId);
+  if(!elMap||typeof L==='undefined')return;
+
+  var titik=[];
+  kunjunganList.forEach(function(c,idx){
+    var k=koordinatKunjungan(c);
+    if(k)titik.push({no:idx+1,lat:k.lat,lng:k.lng,c:c});
+  });
+
+  if(!titik.length){
+    elMap.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:#6b7684;font-size:13px;padding:16px;text-align:center">Belum ada titik kunjungan GPS pada tanggal ini.</div>';
+    return;
+  }
+
+  var map=L.map(elMap,{zoomControl:true});
+  _petaInstance=map;
+
+  L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}',{
+    maxZoom:20,
+    attribution:'&copy; Google Maps'
+  }).addTo(map);
+
+  var latlngs=[];
+  titik.forEach(function(p,i){
+    latlngs.push([p.lat,p.lng]);
+    var cls='pin-mid';
+    if(i===0)cls='pin-start';
+    else if(i===titik.length-1&&titik.length>1)cls='pin-end';
+    var icon=L.divIcon({
+      className:'',
+      html:'<div class="pin-num '+cls+'">'+p.no+'</div>',
+      iconSize:[28,28],
+      iconAnchor:[14,14],
+      popupAnchor:[0,-14]
+    });
+    var waktu=p.c.jam_masuk+(p.c.jam_keluar?' s/d '+p.c.jam_keluar:' (masih di toko)');
+    var popupHtml='<strong>#'+p.no+' '+p.c.nama_toko+'</strong><br>'+
+                  'Kode: '+p.c.kode_toko+'<br>'+
+                  'Jam: '+waktu+'<br>'+
+                  'Status: '+p.c.validasi_status+
+                  (p.c.jarak_m!=null?'<br>Jarak: '+p.c.jarak_m+' m':'');
+    L.marker([p.lat,p.lng],{icon:icon}).addTo(map).bindPopup(popupHtml);
+  });
+
+  if(latlngs.length>1){
+    L.polyline(latlngs,{color:'#1D6FE0',weight:4,opacity:0.85,dashArray:'8, 6'}).addTo(map);
+  }
+
+  if(latlngs.length===1){
+    map.setView(latlngs[0],16);
+  }else{
+    map.fitBounds(L.latLngBounds(latlngs),{padding:[36,36],maxZoom:17});
+  }
+  setTimeout(function(){try{map.invalidateSize();}catch(e){}},150);
+}
+
+function renderKartuPetaTim(listSales){
+  var c=el('div',{class:'card'});
+  c.appendChild(el('div',{class:'label'},'Peta Rute Kunjungan Sales (Google Maps) - '+state.tanggal));
+
+  if(!listSales.length){
+    c.appendChild(el('div',{class:'muted'},'Belum ada sales yang dapat ditampilkan'));
+    return c;
+  }
+
+  var adaPilih=listSales.some(function(u){return u.login===state.petaSales;});
+  if(!adaPilih){
+    var salesAdaKunj=null;
+    for(var i=0;i<listSales.length;i++){
+      if(kunjunganUrutSales(listSales[i].login,state.tanggal).length>0){salesAdaKunj=listSales[i].login;break;}
+    }
+    state.petaSales=salesAdaKunj||listSales[0].login;
+  }
+
+  var sel=el('select',{});
+  listSales.forEach(function(u){
+    var jml=kunjunganUrutSales(u.login,state.tanggal).length;
+    var at={value:u.login};
+    if(u.login===state.petaSales)at.selected='selected';
+    sel.appendChild(el('option',at,u.login+' - '+u.nama+' ('+jml+' kunjungan)'));
+  });
+  sel.value=state.petaSales;
+  sel.addEventListener('change',function(){
+    state.petaSales=sel.value;
+    render();
+  });
+  c.appendChild(sel);
+
+  var kunj=kunjunganUrutSales(state.petaSales,state.tanggal);
+  var titikValid=[];
+  kunj.forEach(function(x){var k=koordinatKunjungan(x);if(k)titikValid.push(k);});
+
+  c.appendChild(el('div',{class:'muted',style:'margin-top:8px'},
+    'Hijau = Toko pertama (#1) · Biru = Toko berikutnya · Merah = Toko terakhir (#'+Math.max(1,kunj.length)+')'));
+
+  var mapDiv=el('div',{id:'petaRuteSales',class:'map-box'});
+  c.appendChild(mapDiv);
+
+  if(titikValid.length){
+    var gLink=linkGoogleMapsRute(titikValid);
+    c.appendChild(el('a',{href:gLink,target:'_blank',rel:'noopener noreferrer',class:'btn-link'},
+      'Buka Rute Lengkap di Google Maps ('+titikValid.length+' Titik)'));
+  }
+
+  if(kunj.length){
+    var listWrap=el('div',{class:'rute-list'});
+    kunj.forEach(function(x,idx){
+      var cls='pin-mid';
+      if(idx===0)cls='pin-start';
+      else if(idx===kunj.length-1&&kunj.length>1)cls='pin-end';
+      var step=el('div',{class:'rute-step'});
+      step.appendChild(el('div',{class:'rute-no '+cls},String(idx+1)));
+      var detail=el('div',{style:'flex:1'});
+      detail.appendChild(el('div',{style:'font-weight:600;font-size:13px'},x.nama_toko+' ('+x.kode_toko+')'));
+      detail.appendChild(el('div',{class:'muted'},
+        'Jam: '+x.jam_masuk+(x.jam_keluar?' s/d '+x.jam_keluar:' - masih di toko')+' · '+x.validasi_status+
+        (x.jarak_m!=null?' · '+x.jarak_m+' m':'')));
+      step.appendChild(detail);
+      listWrap.appendChild(step);
+    });
+    c.appendChild(listWrap);
+  }else{
+    c.appendChild(el('div',{class:'muted',style:'margin-top:8px'},'Sales ini belum memiliki kunjungan sah pada tanggal '+state.tanggal+'.'));
+  }
+
+  setTimeout(function(){gambarPetaRute('petaRuteSales',kunj);},30);
+  return c;
+}
+
+function layarTim(isAdmin){
   var w=el('div',{});
-  var list=spvSalesList();
+  var list=daftarSalesTim(isAdmin);
   var c0=el('div',{class:'card'});
-  c0.appendChild(el('div',{class:'label'},'Tim saya - '+state.tanggal));
+  c0.appendChild(el('div',{class:'label'},(isAdmin?'Semua Tim Sales':'Tim saya')+' - '+state.tanggal));
   c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Jumlah sales'),el('span',{class:'v'},String(list.length))));
+  var totalKunj=0;
+  list.forEach(function(u){totalKunj+=kunjunganUrutSales(u.login,state.tanggal).length;});
+  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Total kunjungan sah'),el('span',{class:'v'},String(totalKunj))));
   w.appendChild(c0);
+
   var pb=pesanBox(); if(pb)w.appendChild(pb);
-  if(!list.length){w.appendChild(el('div',{class:'card muted'},'Belum ada sales yang diizinkan admin'));return w;}
+  if(!list.length){
+    w.appendChild(el('div',{class:'card muted'},isAdmin?'Belum ada user dengan role SALES':'Belum ada sales yang diizinkan admin'));
+    return w;
+  }
+
+  w.appendChild(renderKartuPetaTim(list));
+
   var grid=el('div',{class:'grid2'});
   list.forEach(function(u){grid.appendChild(spvKartuSales(u));});
   w.appendChild(grid);
@@ -1221,6 +1458,7 @@ function spvKartuSales(u){
   for(var i=0;i<cek.length;i++){if(!cek[i].jam_keluar&&cek[i].status_batal!=='BATAL'){aktif=cek[i];break;}}
   var batal=cek.filter(function(c){return c.status_batal==='BATAL';});
   var tanpa=cek.filter(function(c){return c.validasi_status==='TANPA_TITIK'&&c.status_batal!=='BATAL';});
+  var sah=cek.filter(function(c){return c.status_batal!=='BATAL';});
   var c=el('div',{class:'card'});
   var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
   head.appendChild(el('strong',{},u.nama));
@@ -1228,9 +1466,19 @@ function spvKartuSales(u){
   c.appendChild(head);
   c.appendChild(el('div',{class:'muted'},u.login));
   if(aktif)c.appendChild(el('div',{class:'muted'},'Di '+aktif.nama_toko+' sejak '+aktif.jam_masuk));
-  c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Kunjungan'),el('span',{class:'v'},String(cek.length))));
+  c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Kunjungan sah'),el('span',{class:'v'},String(sah.length))));
   c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Tanpa titik'),el('span',{class:'v'},String(tanpa.length))));
   c.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Dibatalkan'),el('span',{class:'v'},String(batal.length))));
+
+  var btMap=el('button',{class:state.petaSales===u.login?'btn-primary':'btn-ghost',style:'width:100%;margin-top:8px'},
+    state.petaSales===u.login?'Sedang Ditampilkan di Peta':'Lihat Peta Rute ('+sah.length+' Toko)');
+  btMap.addEventListener('click',function(){
+    state.petaSales=u.login;
+    render();
+    var m=document.getElementById('petaRuteSales');
+    if(m)m.scrollIntoView({behavior:'smooth',block:'center'});
+  });
+  c.appendChild(btMap);
   return c;
 }
 
@@ -1244,73 +1492,6 @@ function unduhCsv(teks,namaFile){
     setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);},1500);
     return true;
   }catch(e){return false;}
-}
-
-function spvRekap(){
-  var w=el('div',{});
-  var kode=salesUntukSPV(state.user.kode);
-  var semua=db.checkins.filter(function(c){return c.tanggal===state.tanggal&&kode.indexOf(c.sales)>=0;});
-  var sah=semua.filter(function(c){return c.status_batal!=='BATAL';});
-  var c0=el('div',{class:'card'});
-  c0.appendChild(el('div',{class:'label'},'Rekap tim '+state.tanggal));
-  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Total kunjungan sah'),el('span',{class:'v'},String(sah.length))));
-  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Dalam radius'),el('span',{class:'v'},String(sah.filter(function(c){return c.validasi_status==='FINAL_DALAM_RADIUS';}).length))));
-  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Tanpa titik'),el('span',{class:'v'},String(sah.filter(function(c){return c.validasi_status==='TANPA_TITIK';}).length))));
-  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Dibatalkan'),el('span',{class:'v'},String(semua.length-sah.length))));
-  w.appendChild(c0);
-  var pb=pesanBox(); if(pb)w.appendChild(pb);
-  var bx=el('button',{class:'btn-primary',style:'margin-top:8px'},'Export CSV');
-  bx.addEventListener('click',function(){
-    bx.disabled=true;bx.textContent='Menyiapkan...';
-    state.pesan=null;
-    api.exportRekap(state.tanggal).then(function(r){
-      bx.disabled=false;bx.textContent='Export CSV';
-      if(!r||r.ok===false){state.pesan=(r&&r.msg)||'Export gagal';state.pesanTipe='err';render();return;}
-      var nama='rekap-'+state.tanggal+'.csv';
-      if(unduhCsv(r.csv,nama)){state.pesan='Export siap: '+r.jumlah+' kunjungan ('+nama+')';state.pesanTipe='ok';render();}
-      else{state.pesan='Browser memblokir unduhan. Salin CSV dari kotak di bawah.';state.pesanTipe='err';
-        var ta=el('textarea',{style:'width:100%;height:160px;margin-top:8px'});ta.value=r.csv;
-        var lama=document.getElementById('csvManual');if(lama)lama.remove();
-        ta.id='csvManual';document.getElementById('app').appendChild(ta);}
-    }).catch(function(e){
-      bx.disabled=false;bx.textContent='Export CSV';
-      state.pesan='Export gagal: '+(e&&e.message?e.message:e);state.pesanTipe='err';render();
-    });
-  });
-  c0.appendChild(bx);
-  if(!sah.length){w.appendChild(el('div',{class:'card muted'},'Belum ada kunjungan tim hari ini'));return w;}
-  sah.slice().reverse().forEach(function(c){
-    var b=el('div',{class:'card'});
-    var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
-    head.appendChild(el('strong',{},c.nama_toko));
-    head.appendChild(el('span',{class:'badge '+badgeKelas(c.validasi_status)},c.validasi_status));
-    b.appendChild(head);
-    b.appendChild(el('div',{class:'muted'},c.nama_sales+' - '+c.jam_masuk+(c.jarak_m!=null?' - '+c.jarak_m+' m':'')));
-    w.appendChild(b);
-  });
-  return w;
-}
-
-function spvToko(){
-  var w=el('div',{});
-  var ada=db.outlets.filter(function(o){return adaTitik(o);}).length;
-  var c0=el('div',{class:'card'});
-  c0.appendChild(el('div',{class:'label'},'Status titik toko'));
-  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Ada titik'),el('span',{class:'v'},String(ada))));
-  c0.appendChild(el('div',{class:'row'},el('span',{class:'k'},'Tanpa titik'),el('span',{class:'v'},String(db.outlets.length-ada))));
-  w.appendChild(c0);
-  db.outlets.filter(function(o){return !adaTitik(o);}).forEach(function(o){
-    var b=el('div',{class:'card'});
-    var head=el('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:8px'});
-    head.appendChild(el('strong',{},'\u25CB '+o.kode));
-    head.appendChild(el('span',{class:'badge b-kuning'},'TANPA TITIK'));
-    b.appendChild(head);
-    b.appendChild(el('div',{},o.nama));
-    b.appendChild(el('div',{class:'muted'},o.alamat+', '+o.kota));
-    b.appendChild(el('div',{class:'warn'},'Minta admin pusat set titik GPS'));
-    w.appendChild(b);
-  });
-  return w;
 }
 
 /* ===== BOOT ===== */

@@ -87,6 +87,89 @@
 var state={user:null,tab:'toko',adminTab:'titik',spvTab:'tim',pesan:null,pesanTipe:'ok',lokasi:null,akurasi:null,gpsStatus:'idle',gpsErr:null,konfirmasiToko:null,tokoPanel:null,cariToko:'',csvPreview:null,csvNamaFile:'',csvErr:null,loading:true,tanggal:'',hariIni:'',pilihToko:null};
 var db={outlets:[],checkins:[],users:[],aksesSPV:[],audit:[],settings:{radius_default:100,akurasi_maks:50,jam_mulai:'07:00',jam_selesai:'17:00',radius_min:30,radius_maks:300}};
 var SKEY='checkin_gas_sesi_v1';
+var DKEY='checkin_gas_device_id_v1';
+var _cachedDeviceInfo='';
+
+function getDeviceId(){
+  var id='';
+  try{id=localStorage.getItem(DKEY)||'';}catch(e){}
+  if(!id){
+    var rand='';
+    try{
+      if(window.crypto&&crypto.getRandomValues){
+        var arr=new Uint8Array(8);
+        crypto.getRandomValues(arr);
+        for(var i=0;i<arr.length;i++){rand+=('0'+arr[i].toString(16)).slice(-2);}
+      }
+    }catch(e){}
+    if(!rand)rand=Math.random().toString(36).slice(2,10)+Date.now().toString(36);
+    id='DEV-'+rand.toUpperCase();
+    try{localStorage.setItem(DKEY,id);}catch(e){}
+  }
+  return id;
+}
+
+function parseUAFallback(ua){
+  var os='Unknown OS', model='', browser='Browser';
+  var mAnd=ua.match(/Android\s+([0-9._]+)/i);
+  if(mAnd){
+    os='Android '+mAnd[1];
+    var mMod=ua.match(/Android[^;]*;\s*([^;)]+?)(?:\s+Build\/|\))/i);
+    if(mMod&&mMod[1]&&mMod[1].trim()!=='K')model=mMod[1].trim();
+  }else if(/iPhone/i.test(ua)){
+    var mIos=ua.match(/OS\s+([0-9_]+)/i);
+    model='iPhone';
+    os='iOS'+(mIos?' '+mIos[1].replace(/_/g,'.'):'');
+  }else if(/iPad/i.test(ua)){
+    model='iPad';
+    os='iPadOS';
+  }else if(/Windows NT/i.test(ua)){
+    os='Windows';
+  }else if(/Mac OS X/i.test(ua)){
+    os='macOS';
+  }
+  if(/EdgA?\//i.test(ua))browser='Edge';
+  else if(/SamsungBrowser/i.test(ua))browser='Samsung Internet';
+  else if(/OPR\/|Opera/i.test(ua))browser='Opera';
+  else if(/CriOS|Chrome\//i.test(ua))browser='Chrome';
+  else if(/FxiOS|Firefox\//i.test(ua))browser='Firefox';
+  else if(/Safari\//i.test(ua))browser='Safari';
+  var layar=(window.screen?(screen.width+'x'+screen.height):'');
+  return [model,os,browser,layar].filter(Boolean).join(' | ');
+}
+
+function ambilInfoPerangkat(){
+  if(_cachedDeviceInfo)return Promise.resolve(_cachedDeviceInfo);
+  var ua=String(navigator.userAgent||'');
+  var fallback=parseUAFallback(ua);
+  if(navigator.userAgentData&&typeof navigator.userAgentData.getHighEntropyValues==='function'){
+    return navigator.userAgentData.getHighEntropyValues(['model','platform','platformVersion','fullVersionList']).then(function(h){
+      var model=String(h.model||'').trim();
+      var plat=String(h.platform||'').trim();
+      var pver=String(h.platformVersion||'').trim();
+      if(plat==='Android'&&pver)plat='Android '+pver.split('.')[0];
+      var br='';
+      if(Array.isArray(h.fullVersionList)){
+        for(var i=0;i<h.fullVersionList.length;i++){
+          var b=h.fullVersionList[i];
+          if(b&&b.brand&&!/Not.*Brand/i.test(b.brand)&&!/Chromium/i.test(b.brand)){
+            br=b.brand.replace(/Google /i,'')+(b.version?' '+String(b.version).split('.')[0]:'');
+            break;
+          }
+        }
+      }
+      var layar=(window.screen?(screen.width+'x'+screen.height):'');
+      var info=[model,plat,br,layar].filter(Boolean).join(' | ');
+      _cachedDeviceInfo=info||fallback;
+      return _cachedDeviceInfo;
+    }).catch(function(){
+      _cachedDeviceInfo=fallback;
+      return _cachedDeviceInfo;
+    });
+  }
+  _cachedDeviceInfo=fallback;
+  return Promise.resolve(_cachedDeviceInfo);
+}
 
 var API_URL='https://script.google.com/macros/s/AKfycbwfs31wIlYlptkHJYuv_GXruPB8PZp188svfy5QK2C7OBgR9ReX7VMI-W35nRR9JZcmiA/exec';
 
@@ -132,7 +215,7 @@ function mapCheckin(c){
     akurasi_m:(c.akurasi_m===''||c.akurasi_m==null)?null:Number(c.akurasi_m),
     jarak_m:(c.jarak_m===''||c.jarak_m==null)?null:Number(c.jarak_m),
     validasi_status:c.validasi_status, status_batal:c.status_batal||'AKTIF',
-    alasan_batal:c.alasan_batal||'', dibatalkan_by:c.dibatalkan_by||'', dibatalkan_at:c.dibatalkan_at||''
+    alasan_batal:c.alasan_batal||'', dibatalkan_by:c.dibatalkan_by||'', dibatalkan_at:c.dibatalkan_at||'', device_info:c.device_info||''
   };
 }
 
@@ -143,7 +226,7 @@ function isiDB(data){
     radius_min:s.radius_min_m||30,radius_maks:s.radius_maks_m||300};
   state.tanggal=data.tanggal||'';
   state.hariIni=data.tanggal||'';
-  db.users=(data.users||[]).map(function(u){return {login:u.kode_sales,nama:u.nama,role:u.role,aktif:u.aktif};});
+  db.users=(data.users||[]).map(function(u){return {login:u.kode_sales,nama:u.nama,role:u.role,aktif:u.aktif,device_id:u.device_id||'',device_info:u.device_info||''};});
   db.outlets=(data.outlets||[]).map(mapOutlet);
   db.checkins=(data.checkins||[]).map(mapCheckin);
   db.aksesSPV=(data.aksesSPV||[]).map(function(a){
@@ -154,7 +237,7 @@ function isiDB(data){
 
 function muatData(){
   if(!state.user)return Promise.resolve();
-  return panggil('getBootstrap',[state.user.kode]).then(function(data){
+  return panggil('getBootstrap',[state.user.kode,getDeviceId()]).then(function(data){
     if(!data||!data.ok)throw new Error((data&&data.msg)||'Gagal memuat data');
     isiDB(data);
     state.user={kode:data.user.kode_sales,nama:data.user.nama,role:data.user.role,area:data.user.area};
@@ -185,7 +268,9 @@ function cekAkses(kodeInput,pinInput){
   var pin=String(pinInput||'').trim();
   if(!kode||!pin)return Promise.resolve({ok:false,msg:'ID dan PIN wajib diisi'});
   tampilLoading(true);
-  return panggil('login',[kode,pin]).then(function(r){
+  return ambilInfoPerangkat().then(function(devInfo){
+    return panggil('login',[kode,pin,getDeviceId(),devInfo]);
+  }).then(function(r){
     if(!r.ok){tampilLoading(false);return r;}
     state.user={kode:r.user.kode_sales,nama:r.user.nama,role:r.user.role,area:r.user.area};
     localStorage.setItem(SKEY,JSON.stringify({kode:state.user.kode}));
@@ -215,8 +300,8 @@ function adaTitik(o){return o&&o.status==='TITIK_FINAL'&&o.lat!=null&&o.lng!=nul
 
 /* ===== API ===== */
 var api={
-  checkin:function(kodeToko,lat,lng,akurasi){return panggil('checkin',[state.user.kode,kodeToko,lat,lng,akurasi,String(navigator.userAgent||'')]);},
-  checkout:function(id){return panggil('checkout',[state.user.kode,id]);},
+  checkin:function(kodeToko,lat,lng,akurasi){return ambilInfoPerangkat().then(function(devInfo){return panggil('checkin',[state.user.kode,kodeToko,lat,lng,akurasi,devInfo,getDeviceId()]);});},
+  checkout:function(id){return panggil('checkout',[state.user.kode,id,getDeviceId()]);},
   setTitikToko:function(kode,lat,lng,radius){return panggil('setTitikToko',[state.user.kode,kode,lat,lng,radius]);},
   hapusTitikToko:function(kode){return panggil('hapusTitikToko',[state.user.kode,kode]);},
   setRadiusSemuaToko:function(radius){return panggil('setRadiusSemuaToko',[state.user.kode,radius]);},
@@ -225,6 +310,7 @@ var api={
   batalKunjungan:function(id,alasan){return panggil('batalKunjungan',[state.user.kode,id,alasan]);},
   setAksesSPV:function(spv,kodeSales,aktif){return panggil('setAksesSPV',[state.user.kode,spv,kodeSales,aktif]);},
   resetPin:function(target,pin){return panggil('resetPin',[state.user.kode,target,pin]);},
+  resetPerangkat:function(target){return panggil('resetPerangkat',[state.user.kode,target]);},
   setUserAktif:function(target,aktif){return panggil('setUserAktif',[state.user.kode,target,aktif]);},
   exportRekap:function(tanggal){return panggil('exportRekap',[state.user.kode,tanggal]);},
   tambahUser:function(kodeSales,nama,email,role,area,pin){return panggil('tambahUser',[state.user.kode,nama,email,kodeSales,role,area,pin]);}
@@ -538,6 +624,7 @@ function layarRiwayat(){
     b.appendChild(head);
     b.appendChild(el('div',{class:'muted'},c.kode_toko+' - '+c.jam_masuk+(c.jam_keluar?' s/d '+c.jam_keluar:' - belum out')));
     if(c.jarak_m!=null)b.appendChild(el('div',{class:'muted'},'Jarak '+c.jarak_m+' m, akurasi '+(c.akurasi_m!=null?c.akurasi_m+' m':'-')));
+  if(c.device_info)b.appendChild(el('div',{class:'muted'},'HP: '+c.device_info));
     if(c.status_batal==='BATAL')b.appendChild(el('div',{class:'err'},'Dibatalkan: '+c.alasan_batal));
     w.appendChild(b);
   });
@@ -1004,6 +1091,19 @@ function adminUser(){
     c.appendChild(head);
     c.appendChild(el('div',{},u.nama));
     c.appendChild(el('div',{class:'muted'},u.role));
+    if(u.role!=='SALES'){
+      c.appendChild(el('div',{class:'muted',style:'margin-top:4px'},'Perangkat: Bebas login di mana saja'+(u.device_info?' (terakhir: '+u.device_info+')':'')));
+    }else if(u.device_id){
+      c.appendChild(el('div',{class:'ok',style:'margin-top:6px'},'Terikat HP: '+(u.device_info||u.device_id)+' ['+u.device_id.slice(0,12)+']'));
+      var btRstHp=el('button',{class:'btn-ghost',style:'width:100%;margin-top:6px'},'Reset Kunci HP');
+      btRstHp.addEventListener('click',function(){
+        btRstHp.disabled=true;btRstHp.textContent='Mereset HP...';
+        jalankan(api.resetPerangkat(u.login));
+      });
+      c.appendChild(btRstHp);
+    }else{
+      c.appendChild(el('div',{class:'muted',style:'margin-top:4px'},'Perangkat: Belum terikat HP (akan terkunci saat login pertama)'));
+    }
     var pin=el('input',{type:'text',inputmode:'numeric',placeholder:'PIN baru (4-8 digit)',style:'margin-top:8px'});
     c.appendChild(pin);
     var rp=el('button',{class:'btn-primary',style:'margin-top:8px'},'Reset PIN');
@@ -1196,8 +1296,13 @@ function spvToko(){
   var simpan=null;
   try{simpan=JSON.parse(localStorage.getItem(SKEY)||'null');}catch(e){simpan=null;}
   if(!simpan||!simpan.kode){state.loading=false;render();return;}
-  panggil('getBootstrap',[simpan.kode]).then(function(data){
-    if(!data||!data.ok){localStorage.removeItem(SKEY);state.loading=false;render();return;}
+  ambilInfoPerangkat();
+  panggil('getBootstrap',[simpan.kode,getDeviceId()]).then(function(data){
+    if(!data||!data.ok){
+      localStorage.removeItem(SKEY);
+      if(data&&data.msg){state.pesan=data.msg;state.pesanTipe='err';}
+      state.loading=false;render();return;
+    }
     state.user={kode:data.user.kode_sales,nama:data.user.nama,role:data.user.role,area:data.user.area};
     isiDB(data);
     state.loading=false;

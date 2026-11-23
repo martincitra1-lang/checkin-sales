@@ -59,6 +59,24 @@
   .modal-actions{display:flex;gap:8px;margin-top:14px}
   .modal-actions button{flex:1}
   button:disabled{opacity:.55;cursor:not-allowed}
+  .dd-wrap{position:relative}
+  .dd-btn{width:100%;padding:10px 12px;border:1px solid var(--garis);border-radius:8px;background:#fff;color:var(--teks);font-weight:500;text-align:left;display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .dd-btn:focus{outline:2px solid var(--aksen);border-color:var(--aksen)}
+  .dd-btn .dd-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  .dd-btn .dd-arr{color:var(--redup);font-size:12px;flex-shrink:0}
+  .dd-menu{position:absolute;top:calc(100% + 4px);left:0;right:0;background:#fff;border:1px solid var(--garis);border-radius:10px;box-shadow:0 8px 24px rgba(15,44,76,.15);z-index:60;display:none;overflow:hidden}
+  .dd-menu.open{display:block}
+  .dd-search-box{padding:8px;border-bottom:1px solid #eef2f7;background:#fafbfd}
+  .dd-search-box input{padding:8px 10px;font-size:13px}
+  .dd-list{max-height:240px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .dd-item{padding:9px 12px;cursor:pointer;border-bottom:1px solid #f4f6f9}
+  .dd-item:last-child{border-bottom:none}
+  .dd-item:hover{background:#f2f6fc}
+  .dd-item.on{background:#e7f1fd}
+  .dd-item .dd-main{font-size:13px;font-weight:600;color:var(--teks)}
+  .dd-item.on .dd-main{color:var(--aksen)}
+  .dd-item .dd-sub{font-size:11px;color:var(--redup);margin-top:2px}
+  .dd-empty{padding:12px;text-align:center;color:var(--redup);font-size:12px}
 </style>
 </head>
 <body>
@@ -98,7 +116,7 @@ function namaSales(kode){
 
 function mapOutlet(o){
   return {
-    kode:o.kode_toko, nama:o.nama_toko, alamat:o.alamat, kota:o.kota, kecamatan:o.kecamatan||'',
+    kode:String(o.kode_toko==null?'':o.kode_toko), nama:String(o.nama_toko==null?'':o.nama_toko), alamat:String(o.alamat==null?'':o.alamat), kota:String(o.kota==null?'':o.kota), kecamatan:String(o.kecamatan==null?'':o.kecamatan),
     lat:(o.latitude===''||o.latitude==null)?null:Number(o.latitude),
     lng:(o.longitude===''||o.longitude==null)?null:Number(o.longitude),
     radius:(o.radius_m===''||o.radius_m==null)?null:Number(o.radius_m),
@@ -192,7 +210,7 @@ function cekinAktif(){
   return null;
 }
 
-function outletByKode(k){for(var i=0;i<db.outlets.length;i++){if(db.outlets[i].kode===k)return db.outlets[i];}return null;}
+function outletByKode(k){var kk=String(k==null?'':k);for(var i=0;i<db.outlets.length;i++){if(String(db.outlets[i].kode)===kk)return db.outlets[i];}return null;}
 function adaTitik(o){return o&&o.status==='TITIK_FINAL'&&o.lat!=null&&o.lng!=null;}
 
 /* ===== API ===== */
@@ -363,29 +381,92 @@ function infoToko(o){
   return '\u25CB Belum ada titik GPS - check-in tetap boleh dengan konfirmasi lokasi (TANPA_TITIK)';
 }
 
+var _ddOutsideHandler=null;
+
 function layarToko(){
   var w=el('div',{});
   var aktif=cekinAktif();
   var c=el('div',{class:'card'});
   c.appendChild(el('div',{class:'label'},'Pilih Toko'));
-  var sel=el('select',{id:'selToko'});
   var pilihan=db.outlets.filter(function(o){return o.aktif!==false;});
-  var terpilih = state.pilihToko || (pilihan[0] && pilihan[0].kode) || '';
+  var terpilih=String(state.pilihToko||(pilihan[0]&&pilihan[0].kode)||'');
   if(!pilihan.length)c.appendChild(el('div',{class:'warn'},'Belum ada toko aktif'));
-  pilihan.forEach(function(o){var at={value:o.kode};if(o.kode===terpilih)at.selected='selected';sel.appendChild(el('option',at,o.kode+' - '+o.nama));});
-  c.appendChild(sel);
-  sel.value=terpilih;
   state.pilihToko=terpilih;
 
-  var tokoTerpilih=outletByKode(sel.value);
+  var tokoTerpilih=outletByKode(terpilih);
+  var ddWrap=el('div',{class:'dd-wrap'});
+  var ddTxt=el('span',{class:'dd-txt'},tokoTerpilih?(tokoTerpilih.kode+' - '+tokoTerpilih.nama):'-- Pilih Toko --');
+  var ddBtn=el('button',{type:'button',class:'dd-btn'},ddTxt,el('span',{class:'dd-arr'},'▼'));
+  var ddMenu=el('div',{class:'dd-menu'});
+  var ddSearch=el('input',{type:'search',placeholder:'Ketik nama atau kode toko...',autocomplete:'off'});
+  var ddList=el('div',{class:'dd-list'});
+  ddMenu.appendChild(el('div',{class:'dd-search-box'},ddSearch));
+  ddMenu.appendChild(ddList);
+  ddWrap.appendChild(ddBtn);
+  ddWrap.appendChild(ddMenu);
+  c.appendChild(ddWrap);
+
   var info=el('div',{class:tokoTerpilih&&!adaTitik(tokoTerpilih)?'warn':'muted',style:'margin-top:8px'},infoToko(tokoTerpilih));
-  sel.addEventListener('change',function(){
-    state.pilihToko=sel.value;
-    var t=outletByKode(sel.value);
-    info.className=(t&&!adaTitik(t))?'warn':'muted';
-    info.textContent=infoToko(t);
-  });
   c.appendChild(info);
+
+  function tutupDropdown(){
+    ddMenu.classList.remove('open');
+  }
+
+  function isiDaftarDropdown(kata){
+    ddList.innerHTML='';
+    var q=String(kata||'').trim().toLowerCase();
+    var cocok=pilihan.filter(function(o){
+      if(!q)return true;
+      var hay=(o.kode+' '+o.nama+' '+o.alamat+' '+o.kota+' '+o.kecamatan).toLowerCase();
+      return hay.indexOf(q)>=0;
+    });
+    if(!cocok.length){
+      ddList.appendChild(el('div',{class:'dd-empty'},'Toko tidak ditemukan'));
+      return;
+    }
+    var batas=80;
+    cocok.slice(0,batas).forEach(function(o){
+      var item=el('div',{class:'dd-item'+(o.kode===state.pilihToko?' on':'')});
+      item.appendChild(el('div',{class:'dd-main'},o.kode+' - '+o.nama));
+      var subBagian=[];
+      if(o.alamat)subBagian.push(o.alamat);
+      if(o.kota)subBagian.push(o.kota);
+      subBagian.push(adaTitik(o)?'● Ada titik GPS':'○ Tanpa titik');
+      item.appendChild(el('div',{class:'dd-sub'},subBagian.join(' · ')));
+      item.addEventListener('click',function(ev){
+        ev.stopPropagation();
+        state.pilihToko=o.kode;
+        ddTxt.textContent=o.kode+' - '+o.nama;
+        info.className=(!adaTitik(o))?'warn':'muted';
+        info.textContent=infoToko(o);
+        tutupDropdown();
+      });
+      ddList.appendChild(item);
+    });
+    if(cocok.length>batas){
+      ddList.appendChild(el('div',{class:'dd-empty'},'Menampilkan '+batas+' dari '+cocok.length+' toko. Ketik nama toko untuk mencari lebih spesifik.'));
+    }
+  }
+
+  ddBtn.addEventListener('click',function(ev){
+    ev.stopPropagation();
+    var buka=!ddMenu.classList.contains('open');
+    if(buka){
+      ddSearch.value='';
+      isiDaftarDropdown('');
+      ddMenu.classList.add('open');
+      setTimeout(function(){ddSearch.focus();},10);
+    }else{
+      tutupDropdown();
+    }
+  });
+  ddMenu.addEventListener('click',function(ev){ev.stopPropagation();});
+  ddSearch.addEventListener('input',function(){isiDaftarDropdown(ddSearch.value);});
+
+  if(_ddOutsideHandler){document.removeEventListener('click',_ddOutsideHandler);}
+  _ddOutsideHandler=function(){tutupDropdown();};
+  document.addEventListener('click',_ddOutsideHandler);
 
   if(!aktif){
     if(state.gpsStatus==='idle'){
@@ -415,7 +496,7 @@ function layarToko(){
       state.gpsStatus==='loading'?'Menunggu GPS...':'Check In');
     b.addEventListener('click',function(){
       if(!state.lokasi){state.pesan='Menunggu lokasi GPS terkunci';state.pesanTipe='err';render();return;}
-      var toko=outletByKode(sel.value);
+      var toko=outletByKode(state.pilihToko);
       if(!toko){state.pesan='Pilih toko terlebih dahulu';state.pesanTipe='err';render();return;}
       if(!adaTitik(toko)){
         state.konfirmasiToko=toko;
